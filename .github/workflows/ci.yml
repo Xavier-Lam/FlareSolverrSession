@@ -7,6 +7,8 @@ on:
       - "**/*.py"
   pull_request:
     branches: [master]
+    paths:
+      - "**/*.py"
 
 jobs:
   test:
@@ -77,7 +79,7 @@ jobs:
           FLARESOLVERR_URL: http://localhost:8191/v1
         run: |
           python2 -m coverage run -m pytest tests/ -v
-          python2 -m coverage xml
+          python2 -m coverage xml -o coverage-py27.xml
 
       - name: Run tests with coverage (Python 3.x)
         if: matrix.python-version != '2.7'
@@ -85,12 +87,32 @@ jobs:
           FLARESOLVERR_URL: http://localhost:8191/v1
         run: |
           python -m coverage run -m pytest tests/ -v
-          python -m coverage xml
+          python -m coverage xml -o coverage-py${{ matrix.python-version }}.xml
 
-      - name: Upload coverage
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: coverage-*.xml
+          retention-days: 1
+
+  upload-coverage:
+    name: Upload Combined Coverage
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.xml
+          files: ./coverage-*.xml
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

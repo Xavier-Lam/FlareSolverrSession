@@ -29,11 +29,16 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="MIT",
-    py_modules=["flaresolverr_session"],
+    py_modules=["flaresolverr_session", "cli"],
     python_requires=">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*",
     install_requires=[
         "requests",
     ],
+    entry_points={
+        "console_scripts": [
+            "flaresolverr-session=cli:main",
+        ],
+    },
     extras_require={
         "dev": [
             "pytest",

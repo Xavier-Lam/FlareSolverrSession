@@ -35,7 +35,7 @@ with Session("http://localhost:8191/v1") as session:
     print(response.text)
 ```
 
-### With a Custom Session ID
+It is recommended to set a persistent `session_id`.
 
 ```python
 session = Session(
@@ -44,8 +44,28 @@ session = Session(
 )
 ```
 
+### Command-Line Interface
+
+After installation, you can use the `flaresolverr-session` command:
+
+```bash
+flaresolverr-session https://example.com -f http://127.0.0.1:8191/v1 -o output.html
+```
+
+If the FlareSolverr URL is not provided, it will look for the `FLARESOLVERR_URL` environment variable.
+
+#### CLI Examples
+
+```bash
+# Use persistent session
+flaresolverr-session https://example.com -s my-session -o output.html
+
+# POST request
+flaresolverr-session https://example.com -m POST -d "key=value&foo=bar" -o output.html
+```
+
 ### Response Object
-Additionally, FlareSolverr-specific metadata is attached as extra attributes:
+A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`. It contains metadata about the request and challenge solving process returned by *FlareSolverr*.
 
 | Attribute | Description |
 |---|---|
