@@ -417,6 +417,59 @@ class TestUnsupportedMethod(unittest.TestCase):
 
 
 # ===================================================================
+# URL params tests
+# ===================================================================
+
+
+class TestURLParams(unittest.TestCase):
+    """Tests for URL query parameter handling."""
+
+    def test_params_dict_added_to_url(self):
+        """Params dict should be URL-encoded and added to the query string."""
+        with _make_session() as session:
+            # httpbin.org/get echoes back the query parameters
+            resp = session.get(
+                "https://httpbin.org/get",
+                params={"foo": "bar", "baz": "qux"},
+            )
+            assert resp.flaresolverr.status == "ok"
+            # httpbin returns the args in the response
+            assert "foo" in resp.text
+            assert "bar" in resp.text
+            assert "baz" in resp.text
+            assert "qux" in resp.text
+
+    def test_params_added_to_existing_query_string(self):
+        """Params should be appended to existing query string."""
+        with _make_session() as session:
+            resp = session.get(
+                "https://httpbin.org/get?existing=param",
+                params={"new": "value"},
+            )
+            assert resp.flaresolverr.status == "ok"
+            # Both existing and new params should be present
+            assert "existing" in resp.text
+            assert "param" in resp.text
+            assert "new" in resp.text
+            assert "value" in resp.text
+
+    def test_post_with_params(self):
+        """POST request should also support params in URL."""
+        with _make_session() as session:
+            resp = session.post(
+                "https://httpbin.org/post",
+                params={"query": "param"},
+                data={"form": "data"},
+            )
+            assert resp.flaresolverr.status == "ok"
+            # Query param should be in the URL args
+            assert "query" in resp.text
+            assert "param" in resp.text
+            # Form data should be in the form section
+            assert "form" in resp.text
+
+
+# ===================================================================
 # Response building tests
 # ===================================================================
 
