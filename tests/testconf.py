@@ -25,12 +25,10 @@ See https://github.com/FlareSolverr/FlareSolverr/issues/1162
 # -----------------------------------------------------------------------
 CHALLENGE_SITES = [
     {
-        "name": "nowsecure",
-        "url": "https://nowsecure.nl/",
-        "expected_keywords": ["nowsecure"],
+        "name": "scrapingcourse",
+        "url": "https://www.scrapingcourse.com/cloudflare-challenge",
+        "expected_keywords": ["You bypassed the Cloudflare challenge"],
         "expected_status": 200,
-        # Comment out headers - FlareSolverr may return empty headers
-        # "expected_headers": {"content-type": "text/html"},
     },
 ]
 

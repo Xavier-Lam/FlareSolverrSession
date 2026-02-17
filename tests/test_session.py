@@ -108,6 +108,10 @@ def _make_challenge_test(entry):
             _assert_response(resp, entry)
             # FlareSolverr reports "Challenge solved" or similar
             assert resp.flaresolverr.status == "ok"
+            # Ensure the FlareSolverr message indicates a solved challenge
+            assert (
+                "challenge solved" in resp.flaresolverr.message.lower()
+            ), "Expected 'Challenge solved' in FlareSolverr message"
 
     test.__doc__ = "Challenge solved: %s" % entry["url"]
     return test
