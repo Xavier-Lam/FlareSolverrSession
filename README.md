@@ -54,15 +54,7 @@ flaresolverr-session https://example.com -f http://127.0.0.1:8191/v1 -o output.h
 
 If the FlareSolverr URL is not provided, it will look for the `FLARESOLVERR_URL` environment variable.
 
-#### CLI Examples
-
-```bash
-# Use persistent session
-flaresolverr-session https://example.com -s my-session -o output.html
-
-# POST request
-flaresolverr-session https://example.com -m POST -d "key=value&foo=bar" -o output.html
-```
+You can also run the CLI without an output option to see the challenge-solving results in the console.
 
 ### Response Object
 A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`. It contains metadata about the request and challenge solving process returned by *FlareSolverr*.

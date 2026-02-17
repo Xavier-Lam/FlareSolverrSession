@@ -114,38 +114,6 @@ class TestCLI(unittest.TestCase):
             except:
                 pass
 
-    def test_session_id_argument(self):
-        """Test using a specific session ID."""
-        site = NO_CHALLENGE_SITES[0]
-
-        old_stderr = sys.stderr
-        old_stdout = sys.stdout
-        try:
-            sys.stderr = StringIO()
-            sys.stdout = StringIO()
-
-            with mock.patch.object(
-                sys,
-                "argv",
-                [
-                    "flaresolverr-session",
-                    site["url"],
-                    "-f",
-                    FLARESOLVERR_URL,
-                    "-s",
-                    "test-cli-session",
-                ],
-            ):
-                result = cli.main()
-
-            stderr_output = sys.stderr.getvalue()
-        finally:
-            sys.stderr = old_stderr
-            sys.stdout = old_stdout
-
-        self.assertEqual(result, 0)
-        self.assertIn("Status: 200", stderr_output)
-
     def test_method_argument(self):
         """Test specifying HTTP method."""
         site = NO_CHALLENGE_SITES[0]

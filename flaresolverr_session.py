@@ -8,14 +8,14 @@ from requests.structures import CaseInsensitiveDict
 __title__ = "flaresolverr-session"
 __description__ = "A requests.Session that proxies through a FlareSolverr instance."
 __url__ = "https://github.com/Xavier-Lam/FlareSolverrSession"
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "Xavier-Lam"
 __author_email__ = "xavierlam7@hotmail.com"
 
 __all__ = ["Session", "FlareSolverr", "Response", "FlareSolverrError",
            "FlareSolverrChallengeError", "FlareSolverrCaptchaError",
            "FlareSolverrTimeoutError", "FlareSolverrSessionError",
-           "FlareSolverrUnsupportedMethodError"]
+           "FlareSolverrUnsupportedMethodError", "__version__"]
 
 
 class FlareSolverrError(requests.exceptions.RequestException):
