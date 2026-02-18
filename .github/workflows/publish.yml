@@ -29,9 +29,13 @@ jobs:
         run: |
           python -m build
 
+      - name: Build CLI distributions
+        run: |
+          FLARESOLVERR_PACKAGE_NAME=flaresolverr-cli python -m build --outdir dist-cli
+
       - name: List built files
         run: |
-          ls -la dist || true
+          ls -la dist dist-cli || true
 
       - name: Publish to PyPI
         env:
@@ -39,11 +43,19 @@ jobs:
         run: |
           python -m twine upload --non-interactive -u __token__ -p "$PYPI_API_TOKEN" dist/*
 
+      - name: Publish CLI to PyPI
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_CLI_API_TOKEN || secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload --non-interactive -u __token__ -p "$PYPI_API_TOKEN" dist-cli/*
+
       - name: Create GitHub Release and upload dist files
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          files: dist/*
+          files: |
+            dist/*
+            dist-cli/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

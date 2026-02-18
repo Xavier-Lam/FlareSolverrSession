@@ -6,13 +6,22 @@
 
 A [`requests.Session`](https://docs.python-requests.org/) that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API.
 
+The project ships with a RPC client for direct access to the FlareSolverr JSON API, and a command-line interface (CLI) for quick requests and session management.
+
 This project is not responsible for solving challenges itself, it only forwards requests to *FlareSolverr*. If *FlareSolverr* fails to solve a challenge, it will raise an exception. Any issues related to challenge solving should be reported to the *FlareSolverr* project.
+
 
 ## Installation
 
 ```bash
 pip install flaresolverr-session
 ```
+
+or
+
+```bash
+pip install flaresolverr-cli
+``` 
 
 ## Prerequisites
 
@@ -44,19 +53,7 @@ session = Session(
 )
 ```
 
-### Command-Line Interface
-
-After installation, you can use the `flaresolverr-session` command:
-
-```bash
-flaresolverr-session https://example.com -f http://127.0.0.1:8191/v1 -o output.html
-```
-
-If the FlareSolverr URL is not provided, it will look for the `FLARESOLVERR_URL` environment variable.
-
-You can also run the CLI without an output option to see the challenge-solving results in the console.
-
-### Response Object
+#### Response Object
 A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`. It contains metadata about the request and challenge solving process returned by *FlareSolverr*.
 
 | Attribute | Description |
@@ -67,7 +64,7 @@ A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`
 | `flaresolverr.start` / `flaresolverr.end` | Request timestamps (ms) |
 | `flaresolverr.version` | FlareSolverr server version |
 
-### Exception Handling
+#### Exception Handling
 
 | Exception | Description |
 |---|---|
@@ -77,6 +74,70 @@ A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`
 | `FlareSolverrTimeoutError` | Request timed out. |
 | `FlareSolverrSessionError` | Session creation/destruction failed. |
 | `FlareSolverrUnsupportedMethodError` | Unsupported HTTP method or content type. |
+
+### Command-Line Interface
+
+After installation, you can use the `flaresolverr-cli` command. It is a convenient CLI tool to send HTTP requests through FlareSolverr and manage sessions.
+
+It will output json response from FlareSolverr. If the FlareSolverr URL is not provided via `-f`, it will use the `FLARESOLVERR_URL` environment variable (defaulting to `http://localhost:8191/v1`).
+
+#### Sending requests
+
+The `request` command is the default — you can omit the word `request`:
+
+```bash
+flaresolverr-cli https://example.com -o output.html
+
+# GET with a custom FlareSolverr URL
+flaresolverr-cli -f http://localhost:8191/v1 https://example.com
+
+# POST with form data (data implies POST)
+flaresolverr-cli https://example.com -d "key=value&foo=bar"
+```
+
+#### Managing sessions
+
+```bash
+# Create a session (auto-generated name)
+flaresolverr-cli -f http://localhost:8191/v1 session create my-session
+
+# List all active sessions
+flaresolverr-cli session list
+
+# Destroy a session
+flaresolverr-cli session destroy my-session
+```
+
+### RPC Tool
+
+The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, useful when you need low-level access to the raw API responses.
+
+```python
+from flaresolverr_rpc import RPC
+
+with RPC("http://localhost:8191/v1") as rpc:
+    # Session management
+    rpc.session.create(session_id="my-session", proxy="http://proxy:8080")
+    sessions = rpc.session.list()
+    print(sessions["sessions"])
+
+    # HTTP requests
+    result = rpc.request.get("https://example.com", session_id="my-session")
+    print(result["solution"]["url"])
+    print(result["solution"]["response"])  # HTML body
+
+    result = rpc.request.post(
+        "https://example.com",
+        data="key=value",
+        session_id="my-session",
+    )
+
+    # Cleanup
+    rpc.session.destroy("my-session")
+```
+
+All methods return the raw JSON response dict from FlareSolverr.
+
 
 ## Limitations
 

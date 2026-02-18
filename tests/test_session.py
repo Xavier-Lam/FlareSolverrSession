@@ -86,7 +86,7 @@ def _assert_response(response, entry):
 
 def _list_sessions(session=None):
     payload = {"cmd": "sessions.list"}
-    data = session._send(payload)
+    data = session.send(payload)
     return data.get("sessions", [])
 
 

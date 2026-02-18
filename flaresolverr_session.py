@@ -12,7 +12,7 @@ from requests.structures import CaseInsensitiveDict
 __title__ = "flaresolverr-session"
 __description__ = "A requests.Session that proxies through a FlareSolverr instance."
 __url__ = "https://github.com/Xavier-Lam/FlareSolverrSession"
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 __author__ = "Xavier-Lam"
 __author_email__ = "xavierlam7@hotmail.com"
 
@@ -137,7 +137,7 @@ class Session(requests.Session):
             )
 
         payload = self._build_payload(method, url, **kwargs)
-        resp_data = self._send(payload)
+        resp_data = self.send(payload)
         return Response(resp_data)
 
     def close(self):
@@ -208,7 +208,7 @@ class Session(requests.Session):
             return proxy
         return {"url": proxy}
 
-    def _send(self, payload):
+    def send(self, payload):
         headers = {"Content-Type": "application/json"}
         resp = self._api_session.post(
             self._flaresolverr_url,
@@ -228,7 +228,7 @@ class Session(requests.Session):
             payload["proxy"] = self._proxy
 
         try:
-            data = self._send(payload)
+            data = self.send(payload)
         except Exception as exc:
             raise FlareSolverrSessionError(
                 "Failed to create FlareSolverr session: %s" % exc
@@ -252,7 +252,7 @@ class Session(requests.Session):
             "session": self._session_id,
         }
         try:
-            self._send(payload)
+            self.send(payload)
         except Exception:
             return  # Best-effort cleanup
 

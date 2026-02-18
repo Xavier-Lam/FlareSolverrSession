@@ -1,122 +1,291 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Command-line interface for FlareSolverr Session."""
 
 from __future__ import print_function
 
 import argparse
+import json
 import os
 import sys
 
-from flaresolverr_session import Session
+from flaresolverr_rpc import RPC
 
 
-def main():
-    """Run the CLI."""
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    main_parser = _build_main_parser()
+
+    # Handle top-level -h/--help when no command specified
+    if not argv or argv == ["-h"] or argv == ["--help"]:
+        main_parser.print_help()
+        return 0
+
+    first_args, remaining = main_parser.parse_known_args(argv)
+    command = first_args.command
+
+    if command == "session":
+        parser = _build_session_parser()
+        args = parser.parse_args([command] + remaining)
+        rpc = RPC(first_args.flaresolverr_url)
+        res = _handle_session(rpc, args)
+        _format_output(res)
+        return 0
+
+    if command == "request":
+        request_argv = remaining
+    elif command is not None:
+        request_argv = [command] + remaining
+    else:
+        main_parser.print_help()
+        return 0
+
+    req_parser = _build_request_parser()
+    args = req_parser.parse_args(request_argv)
+    rpc = RPC(first_args.flaresolverr_url)
+    res = _handle_request(rpc, args)
+    _truncate_response_body(res)
+    _format_output(res)
+    return 0
+
+
+def _build_main_parser():
     parser = argparse.ArgumentParser(
-        description="Make HTTP requests through FlareSolverr",
+        prog="flaresolverr-cli",
+        description="Interact with a FlareSolverr instance",
+        add_help=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  flaresolverr-session https://example.com -f http://localhost:8191/v1 -o output.html
-  flaresolverr-session https://example.com -m POST -d "key=value&foo=bar" -o output.html
-  flaresolverr-session https://example.com --proxy http://proxy:8080
-        """,
-    )
-    parser.add_argument(
-        "url",
-        help="URL to request",
+        epilog=(
+            "commands:\n"
+            "  session             Manage FlareSolverr sessions\n"
+            "  request (default)   Send an HTTP request through FlareSolverr\n\n"
+            "Run 'flaresolverr-cli session --help' or "
+            "'flaresolverr-cli request --help' for more information."
+        ),
     )
     parser.add_argument(
         "-f",
         "--flaresolverr",
         dest="flaresolverr_url",
         default=os.environ.get("FLARESOLVERR_URL", "http://localhost:8191/v1"),
-        help="FlareSolverr API endpoint (default: FLARESOLVERR_URL env var or http://localhost:8191/v1)",
+        help=(
+            "FlareSolverr API endpoint (default: FLARESOLVERR_URL "
+            "env var or http://localhost:8191/v1)"
+        ),
     )
-    parser.add_argument(
+    parser.add_argument("command", nargs="?", default=None)
+    return parser
+
+
+def _build_session_parser():
+    parser = argparse.ArgumentParser(
+        prog="flaresolverr-cli",
+        description="Interact with a FlareSolverr instance",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+    session_parser = subparsers.add_parser(
+        "session",
+        help="Manage FlareSolverr sessions",
+    )
+    session_sub = session_parser.add_subparsers(dest="session_action")
+    session_sub.required = True
+
+    # session create
+    create_parser = session_sub.add_parser("create", help="Create a session")
+    create_parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Optional session name",
+    )
+    create_parser.add_argument(
         "--proxy",
-        help="Proxy URL (e.g., http://proxy:8080)",
+        default=None,
+        help="Proxy URL (e.g. http://proxy:8080)",
+    )
+
+    # session list
+    session_sub.add_parser("list", help="List active sessions")
+
+    # session destroy
+    destroy_parser = session_sub.add_parser("destroy", help="Destroy a session")
+    destroy_parser.add_argument(
+        "session_id",
+        help="Session identifier to destroy",
+    )
+
+    return parser
+
+
+def _build_request_parser():
+    parser = argparse.ArgumentParser(
+        prog="flaresolverr-cli request",
+        description="Send an HTTP request through FlareSolverr",
     )
     parser.add_argument(
-        "-t",
-        "--timeout",
-        type=int,
-        help="Request timeout in milliseconds (default: 60000)",
+        "url",
+        help="URL to request",
+    )
+    parser.add_argument(
+        "-m",
+        "--method",
+        default=None,
+        choices=["GET", "POST"],
+        help="HTTP method (default: GET, or POST when -d is given)",
+    )
+    parser.add_argument(
+        "-s",
+        "--session-id",
+        dest="session_id",
+        default=None,
+        help="FlareSolverr session id to use",
+    )
+    parser.add_argument(
+        "-d",
+        "--data",
+        default=None,
+        help="POST data (x-www-form-urlencoded)",
     )
     parser.add_argument(
         "-o",
         "--output",
         dest="output_file",
+        default=None,
         help="Write response body to file",
     )
     parser.add_argument(
-        "-m",
-        "--method",
-        default="GET",
-        choices=["GET", "POST"],
-        help="HTTP method (default: GET)",
+        "-t",
+        "--timeout",
+        type=int,
+        default=None,
+        help="Request timeout in milliseconds (default: 60000)",
     )
     parser.add_argument(
-        "-d",
-        "--data",
-        help="POST data (x-www-form-urlencoded)",
+        "--proxy",
+        default=None,
+        help="Proxy URL (e.g. http://proxy:8080)",
     )
+    parser.add_argument(
+        "--session-ttl-minutes",
+        dest="session_ttl_minutes",
+        type=int,
+        default=None,
+        help="Auto-rotate sessions older than this many minutes",
+    )
+    parser.add_argument(
+        "--return-only-cookies",
+        dest="return_only_cookies",
+        action="store_true",
+        default=False,
+        help="Return only cookies, omitting the response body",
+    )
+    parser.add_argument(
+        "--return-screenshot",
+        dest="return_screenshot",
+        action="store_true",
+        default=False,
+        help="Include a Base64 PNG screenshot in the response",
+    )
+    parser.add_argument(
+        "--wait",
+        dest="wait_in_seconds",
+        type=int,
+        default=None,
+        help="Extra seconds to wait after the challenge is solved",
+    )
+    parser.add_argument(
+        "--disable-media",
+        dest="disable_media",
+        action="store_true",
+        default=False,
+        help="Disable loading images, CSS and fonts",
+    )
+    return parser
 
-    args = parser.parse_args()
 
-    # Build session kwargs
-    session_kwargs = {
-        "session_id": "flaresolverr-session-cli",
-        "flaresolverr_url": args.flaresolverr_url,
-    }
-    if args.proxy:
-        session_kwargs["proxy"] = args.proxy
-    if args.timeout:
-        session_kwargs["timeout"] = args.timeout
-    # Build request kwargs
-    request_kwargs = {}
-    if args.data:
-        request_kwargs["data"] = args.data
+def _handle_session(rpc, args):
+    action = args.session_action
 
-    with Session(**session_kwargs) as session:
-        print("Requesting %s..." % args.url, file=sys.stderr)
-        response = session.request(args.method, args.url, **request_kwargs)
-
-        # Print metadata to stderr
-        print("\n--- Response ---", file=sys.stderr)
-        print("Status: %d" % response.status_code, file=sys.stderr)
-        print("URL: %s" % response.url, file=sys.stderr)
-
-        print("\n--- Headers ---", file=sys.stderr)
-        for key, value in response.headers.items():
-            print("%s: %s" % (key, value), file=sys.stderr)
-
-        print("\n--- Cookies ---", file=sys.stderr)
-        for cookie in response.cookies:
-            print("%s=%s" % (cookie.name, cookie.value), file=sys.stderr)
-
-        print("\n--- FlareSolverr Metadata ---", file=sys.stderr)
-        print("Status: %s" % response.flaresolverr.status, file=sys.stderr)
-        print("Message: %s" % response.flaresolverr.message, file=sys.stderr)
-        print("User-Agent: %s" % response.flaresolverr.user_agent, file=sys.stderr)
-        print("Version: %s" % response.flaresolverr.version, file=sys.stderr)
-        print(
-            "Duration: %d ms"
-            % (response.flaresolverr.end - response.flaresolverr.start),
-            file=sys.stderr,
+    if action == "create":
+        return rpc.session.create(
+            session_id=getattr(args, "name", None),
+            proxy=getattr(args, "proxy", None),
         )
+    elif action == "list":
+        return rpc.session.list()
+    elif action == "destroy":
+        return rpc.session.destroy(args.session_id)
+    else:
+        raise ValueError("Unknown session action: %s" % action)
 
-        # Write output
-        if args.output_file:
-            with open(args.output_file, "wb") as f:
-                f.write(response.content)
-            print(
-                "\nResponse body written to: %s" % args.output_file,
-                file=sys.stderr,
-            )
 
-        return 0
+def _handle_request(rpc, args):
+    """Send a request through FlareSolverr and display the result.
+
+    Parameters:
+        rpc (RPC): RPC client instance.
+        args (argparse.Namespace): Parsed CLI arguments.
+    """
+    method = getattr(args, "method", None)
+    data = getattr(args, "data", None)
+    if method is None:
+        method = "POST" if data else "GET"
+
+    kwargs = {}
+    session_id = getattr(args, "session_id", None)
+    if session_id:
+        kwargs["session_id"] = session_id
+    timeout = getattr(args, "timeout", None)
+    if timeout:
+        kwargs["max_timeout"] = timeout
+    proxy = getattr(args, "proxy", None)
+    if proxy:
+        kwargs["proxy"] = proxy
+    session_ttl_minutes = getattr(args, "session_ttl_minutes", None)
+    if session_ttl_minutes is not None:
+        kwargs["session_ttl_minutes"] = session_ttl_minutes
+    if getattr(args, "return_only_cookies", False):
+        kwargs["return_only_cookies"] = True
+    if getattr(args, "return_screenshot", False):
+        kwargs["return_screenshot"] = True
+    wait_in_seconds = getattr(args, "wait_in_seconds", None)
+    if wait_in_seconds is not None:
+        kwargs["wait_in_seconds"] = wait_in_seconds
+    if getattr(args, "disable_media", False):
+        kwargs["disable_media"] = True
+
+    if method == "POST":
+        result = rpc.request.post(args.url, data=data, **kwargs)
+    else:
+        result = rpc.request.get(args.url, **kwargs)
+
+    # Write body to file if requested
+    output_file = getattr(args, "output_file", None)
+    if output_file:
+        body = result.get("solution", {}).get("response", "")
+        if isinstance(body, bytes):
+            content = body
+        else:
+            content = body.encode("utf-8")
+        with open(output_file, "wb") as f:
+            f.write(content)
+
+    return result
+
+
+def _truncate_response_body(data, max_length=200):
+    solution = data.get("solution")
+    if not solution:
+        return data
+    body = solution.get("response", "")
+    if body and len(body) > max_length:
+        solution["response"] = body[:max_length] + "...[%d letters]" % len(body)
+    return data
+
+
+def _format_output(data):
+    print(json.dumps(data, indent=2))
 
 
 if __name__ == "__main__":
