@@ -6,6 +6,7 @@ to verify that CLI arguments are correctly parsed and the right RPC
 methods are invoked with the expected arguments.
 """
 
+import base64
 import json
 import sys
 import unittest
@@ -67,6 +68,7 @@ def _fake_rpc():
             "status": 200,
             "headers": {},
             "response": "<html>Hello</html>",
+            "screenshot": base64.b64encode(b"test").decode("ascii"),
             "cookies": [],
             "userAgent": "TestAgent",
         },
@@ -314,7 +316,9 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_return_screenshot(self):
         """Request with --return-screenshot."""
-        code, out, _err, rpc = _run_cli(["https://example.com", "--return-screenshot"])
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "--screenshot", "s.png"]
+        )
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", return_screenshot=True
@@ -344,7 +348,8 @@ class TestRequestWithOptions(unittest.TestCase):
                 "--session-ttl-minutes",
                 "15",
                 "--return-only-cookies",
-                "--return-screenshot",
+                "--screenshot",
+                "ss.png",
                 "--wait",
                 "3",
                 "--disable-media",
@@ -407,6 +412,44 @@ class TestRequestOutputFile(unittest.TestCase):
         handle = m()
         handle.write.assert_called_once_with(b"<html>Hello</html>")
 
+    def test_screenshot_file(self):
+        """Screenshot is written to file when --screenshot is provided."""
+        rpc = _fake_rpc()
+        png = b"PNGDATA"
+        b64 = base64.b64encode(png).decode("ascii")
+        rpc.request.get.return_value = {
+            "status": "ok",
+            "message": "",
+            "solution": {
+                "url": "https://example.com/",
+                "status": 200,
+                "headers": {},
+                "response": "<html>Hello</html>",
+                "cookies": [],
+                "userAgent": "TestAgent",
+                "screenshot": b64,
+            },
+            "version": "3.3.21",
+            "startTimestamp": 100,
+            "endTimestamp": 200,
+        }
+
+        with mock.patch("cli.RPC", return_value=rpc):
+            m = mock.mock_open()
+            with mock.patch(
+                "cli.open" if sys.version_info[0] >= 3 else "__builtin__.open", m
+            ):
+                old_stdout = sys.stdout
+                sys.stdout = StringIO()
+                try:
+                    main(["https://example.com", "--screenshot", "out.png"])
+                finally:
+                    sys.stdout = old_stdout
+
+        m.assert_called_with("out.png", "wb")
+        handle = m()
+        handle.write.assert_called_once_with(png)
+
 
 class TestTruncateResponseBody(unittest.TestCase):
     """Tests for _truncate_response_body."""
@@ -424,12 +467,6 @@ class TestTruncateResponseBody(unittest.TestCase):
         result = _truncate_response_body(data, max_length=100)
         self.assertIn("...[500 letters]", result["solution"]["response"])
         self.assertTrue(result["solution"]["response"].startswith("a" * 100))
-
-    def test_no_solution(self):
-        """No solution key returns data unmodified."""
-        data = {"status": "ok"}
-        result = _truncate_response_body(data)
-        self.assertEqual(result, data)
 
     def test_empty_response(self):
         """Empty response string is not truncated."""
@@ -639,8 +676,7 @@ class TestCliErrorHandling(unittest.TestCase):
     def test_session_command_error_exits_nonzero(self):
         """FlareSolverrResponseError during session command exits 1."""
         fake_resp = {"status": "error", "message": "Session not found"}
-        exc = FlareSolverrResponseError("Session not found",
-                                        response_data=fake_resp)
+        exc = FlareSolverrResponseError("Session not found", response_data=fake_resp)
         rpc = _fake_rpc()
         rpc.session.destroy.side_effect = exc
         code, out, err, _ = _run_cli(["session", "destroy", "s1"], rpc=rpc)
@@ -651,12 +687,10 @@ class TestCliErrorHandling(unittest.TestCase):
     def test_post_error_exits_nonzero(self):
         """FlareSolverrResponseError on POST request exits 1."""
         fake_resp = {"status": "error", "message": "Challenge not solved"}
-        exc = FlareSolverrResponseError("Challenge not solved",
-                                        response_data=fake_resp)
+        exc = FlareSolverrResponseError("Challenge not solved", response_data=fake_resp)
         rpc = _fake_rpc()
         rpc.request.post.side_effect = exc
-        code, out, err, _ = _run_cli(["https://example.com", "-d", "foo=bar"],
-                                     rpc=rpc)
+        code, out, err, _ = _run_cli(["https://example.com", "-d", "foo=bar"], rpc=rpc)
         self.assertEqual(code, 1)
         data = json.loads(err)
         self.assertEqual(data["status"], "error")
@@ -670,8 +704,7 @@ class TestCliErrorHandling(unittest.TestCase):
             "startTimestamp": 100,
             "endTimestamp": 200,
         }
-        exc = FlareSolverrResponseError("Challenge not solved",
-                                        response_data=fake_resp)
+        exc = FlareSolverrResponseError("Challenge not solved", response_data=fake_resp)
         rpc = self._make_rpc_raising(exc)
         code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
         self.assertEqual(code, 1)

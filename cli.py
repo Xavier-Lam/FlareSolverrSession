@@ -4,6 +4,7 @@
 from __future__ import print_function
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -186,11 +187,10 @@ def _build_request_parser():
         help="Return only cookies, omitting the response body",
     )
     parser.add_argument(
-        "--return-screenshot",
-        dest="return_screenshot",
-        action="store_true",
-        default=False,
-        help="Include a Base64 PNG screenshot in the response",
+        "--screenshot",
+        dest="screenshot",
+        default=None,
+        help="Write PNG screenshot of the final rendered page after all challenges and waits are completed to given path",
     )
     parser.add_argument(
         "--wait",
@@ -252,7 +252,8 @@ def _handle_request(rpc, args):
         kwargs["session_ttl_minutes"] = session_ttl_minutes
     if getattr(args, "return_only_cookies", False):
         kwargs["return_only_cookies"] = True
-    if getattr(args, "return_screenshot", False):
+    screenshot_path = getattr(args, "screenshot", None)
+    if screenshot_path:
         kwargs["return_screenshot"] = True
     wait_in_seconds = getattr(args, "wait_in_seconds", None)
     if wait_in_seconds is not None:
@@ -276,16 +277,23 @@ def _handle_request(rpc, args):
         with open(output_file, "wb") as f:
             f.write(content)
 
+    # Write screenshot to file if requested
+    if screenshot_path:
+        screenshot_b64 = result["solution"]["screenshot"]
+        data = base64.b64decode(screenshot_b64)
+        with open(screenshot_path, "wb") as f:
+            f.write(data)
+
     return result
 
 
 def _truncate_response_body(data, max_length=200):
-    solution = data.get("solution")
-    if not solution:
-        return data
-    body = solution.get("response", "")
-    if body and len(body) > max_length:
+    solution = data["solution"]
+    body = solution["response"]
+    if len(body) > max_length:
         solution["response"] = body[:max_length] + "...[%d letters]" % len(body)
+    if solution.get("screenshot"):
+        solution["screenshot"] = "[%d bytes of PNG data]" % len(solution["screenshot"])
     return data
 
 
