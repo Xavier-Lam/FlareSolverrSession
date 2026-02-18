@@ -29,9 +29,8 @@ import requests
 
 from flaresolverr_session import (
     FlareSolverrCaptchaError,
-    FlareSolverrChallengeError,
     FlareSolverrError,
-    FlareSolverrSessionError,
+    FlareSolverrResponseError,
     FlareSolverrTimeoutError,
     FlareSolverrUnsupportedMethodError,
     Session,
@@ -158,7 +157,7 @@ class TestUnsolvedChallenge(unittest.TestCase):
     """Mock an unsolved challenge to verify exception handling."""
 
     def test_challenge_not_solved(self):
-        """FlareSolverrChallengeError raised on failed challenge."""
+        """FlareSolverrResponseError raised on failed challenge."""
         fake_json = {
             "status": "error",
             "message": "Challenge not solved",
@@ -175,8 +174,11 @@ class TestUnsolvedChallenge(unittest.TestCase):
                 mock_resp.json.return_value = fake_json
                 mocked_post.return_value = mock_resp
 
-                with self.assertRaises(FlareSolverrChallengeError):
+                with self.assertRaises(FlareSolverrResponseError) as ctx:
                     session.get("https://example.com")
+                self.assertEqual(ctx.exception.response_data, fake_json)
+                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
+                self.assertEqual(ctx.exception.message, "Challenge not solved")
 
     def test_captcha_detected(self):
         """FlareSolverrCaptchaError raised when captcha is detected."""
@@ -196,8 +198,10 @@ class TestUnsolvedChallenge(unittest.TestCase):
                 mock_resp.json.return_value = fake_json
                 mocked_post.return_value = mock_resp
 
-                with self.assertRaises(FlareSolverrCaptchaError):
+                with self.assertRaises(FlareSolverrCaptchaError) as ctx:
                     session.get("https://example.com")
+                self.assertEqual(ctx.exception.response_data, fake_json)
+                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
 
     def test_timeout_error(self):
         """FlareSolverrTimeoutError raised on timeout."""
@@ -217,8 +221,10 @@ class TestUnsolvedChallenge(unittest.TestCase):
                 mock_resp.json.return_value = fake_json
                 mocked_post.return_value = mock_resp
 
-                with self.assertRaises(FlareSolverrTimeoutError):
+                with self.assertRaises(FlareSolverrTimeoutError) as ctx:
                     session.get("https://example.com")
+                self.assertEqual(ctx.exception.response_data, fake_json)
+                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
 
 
 # ===================================================================
@@ -230,9 +236,13 @@ class TestNetworkError(unittest.TestCase):
     """Verify that a network error to FlareSolverr is raised properly."""
 
     def test_connection_error(self):
-        """ConnectionError raised when FlareSolverr is unreachable."""
-        # Use a URL that will definitely not have a FlareSolverr running
-        with self.assertRaises(FlareSolverrSessionError):
+        """A network-level error propagates as a requests exception."""
+        # Use a URL that will definitely not have a FlareSolverr running.
+        # The underlying requests library raises ConnectionError (not a
+        # FlareSolverrError) when the host is unreachable.
+        import requests as _requests
+
+        with self.assertRaises(_requests.exceptions.RequestException):
             session = _make_session(
                 flaresolverr_url="http://127.0.0.1:1/v1",
                 proxy=None,
@@ -522,20 +532,35 @@ class TestExceptionHierarchy(unittest.TestCase):
     def test_base_inherits_from_requests(self):
         assert issubclass(FlareSolverrError, requests.exceptions.RequestException)
 
-    def test_challenge_error(self):
-        assert issubclass(FlareSolverrChallengeError, FlareSolverrError)
+    def test_response_error_inherits_from_base(self):
+        assert issubclass(FlareSolverrResponseError, FlareSolverrError)
 
-    def test_captcha_error(self):
-        assert issubclass(FlareSolverrCaptchaError, FlareSolverrChallengeError)
+    def test_captcha_error_inherits_from_response_error(self):
+        assert issubclass(FlareSolverrCaptchaError, FlareSolverrResponseError)
 
-    def test_timeout_error(self):
-        assert issubclass(FlareSolverrTimeoutError, FlareSolverrError)
-
-    def test_session_error(self):
-        assert issubclass(FlareSolverrSessionError, FlareSolverrError)
+    def test_timeout_error_inherits_from_response_error(self):
+        assert issubclass(FlareSolverrTimeoutError, FlareSolverrResponseError)
 
     def test_unsupported_method_error(self):
         assert issubclass(FlareSolverrUnsupportedMethodError, FlareSolverrError)
+
+    def test_response_error_carries_response_dict(self):
+        """FlareSolverrResponseError stores the raw response."""
+        data = {"status": "error", "message": "oops"}
+        exc = FlareSolverrResponseError("oops", response_data=data)
+        assert exc.response_data is data
+
+    def test_captcha_error_carries_response_dict(self):
+        """FlareSolverrCaptchaError stores the raw response."""
+        data = {"status": "error", "message": "captcha"}
+        exc = FlareSolverrCaptchaError("captcha", response_data=data)
+        assert exc.response_data is data
+
+    def test_timeout_error_carries_response_dict(self):
+        """FlareSolverrTimeoutError stores the raw response."""
+        data = {"status": "error", "message": "timeout"}
+        exc = FlareSolverrTimeoutError("timeout", response_data=data)
+        assert exc.response_data is data
 
 
 if __name__ == "__main__":

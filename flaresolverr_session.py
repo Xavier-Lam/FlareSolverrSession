@@ -1,6 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 
 import json
+
 try:
     from urllib import urlencode
 except ImportError:
@@ -17,29 +18,35 @@ __author__ = "Xavier-Lam"
 __author_email__ = "xavierlam7@hotmail.com"
 
 __all__ = ["Session", "FlareSolverr", "Response", "FlareSolverrError",
-           "FlareSolverrChallengeError", "FlareSolverrCaptchaError",
-           "FlareSolverrTimeoutError", "FlareSolverrSessionError",
-           "FlareSolverrUnsupportedMethodError", "__version__"]
+           "FlareSolverrResponseError", "FlareSolverrCaptchaError",
+           "FlareSolverrTimeoutError", "FlareSolverrUnsupportedMethodError",
+           "__version__",]
 
 
-class FlareSolverrError(requests.exceptions.RequestException):
+class FlareSolverrError(requests.RequestException):
     """Base exception for FlareSolverr errors."""
 
 
-class FlareSolverrChallengeError(FlareSolverrError):
-    """Raised when FlareSolverr failed to solve the challenge."""
+class FlareSolverrResponseError(FlareSolverrError):
+    """Raised when FlareSolverr returns a non-ok response.
+
+    Attributes:
+        message (str): The error message from FlareSolverr.
+        response_data (dict or None): The original FlareSolverr response dict.
+    """
+
+    def __init__(self, message, response_data=None, **kwargs):
+        super(FlareSolverrResponseError, self).__init__(message, **kwargs)
+        self.message = message or ""
+        self.response_data = response_data
 
 
-class FlareSolverrCaptchaError(FlareSolverrChallengeError):
+class FlareSolverrCaptchaError(FlareSolverrResponseError):
     """Raised when a CAPTCHA was encountered but could not be solved."""
 
 
-class FlareSolverrTimeoutError(FlareSolverrError):
+class FlareSolverrTimeoutError(FlareSolverrResponseError):
     """Raised when FlareSolverr timed out while solving the challenge."""
-
-
-class FlareSolverrSessionError(FlareSolverrError):
-    """Raised when session operations (create / destroy) fail."""
 
 
 class FlareSolverrUnsupportedMethodError(FlareSolverrError):
@@ -118,8 +125,11 @@ class Session(requests.Session):
         Raises:
             FlareSolverrUnsupportedMethodError: If *method* is not
                 ``GET`` or ``POST``, or if ``json`` data is passed.
-            FlareSolverrChallengeError: If the challenge was not
-                solved.
+            FlareSolverrResponseError: If FlareSolverr returns a
+                non-ok status for any reason (challenge not solved,
+                timeout, session error, etc.).  The original response
+                dict is available on the exception's ``response``
+                attribute.
             FlareSolverrCaptchaError: If a CAPTCHA was detected.
             FlareSolverrTimeoutError: If FlareSolverr timed out.
         """
@@ -137,7 +147,14 @@ class Session(requests.Session):
             )
 
         payload = self._build_payload(method, url, **kwargs)
-        resp_data = self.send(payload)
+        try:
+            resp_data = self.send(payload)
+        except FlareSolverrResponseError as e:
+            if "captcha" in e.message.lower():
+                raise FlareSolverrCaptchaError(e.message, response_data=e.response_data)
+            elif "timeout" in e.message.lower():
+                raise FlareSolverrTimeoutError(e.message, response_data=e.response_data)
+            raise
         return Response(resp_data)
 
     def close(self):
@@ -152,14 +169,14 @@ class Session(requests.Session):
 
     def _build_payload(self, method, url, **kwargs):
         params = kwargs.get("params")
-        if params:            
+        if params:
             if isinstance(params, dict):
                 encoded_params = urlencode(params)
-                if '?' in url:
-                    url = url + '&' + encoded_params
+                if "?" in url:
+                    url = url + "&" + encoded_params
                 else:
-                    url = url + '?' + encoded_params
-        
+                    url = url + "?" + encoded_params
+
         cmd = "request.get" if method == "GET" else "request.post"
         payload = {
             "cmd": cmd,
@@ -191,15 +208,6 @@ class Session(requests.Session):
 
         return payload
 
-    def _handle_response(self, data):
-        status = data.get("status", "")
-        message = data.get("message", "")
-
-        if status != "ok":
-            self._raise_for_status(status, message)
-
-        return data
-
     @staticmethod
     def _normalise_proxy(proxy):
         if proxy is None:
@@ -216,7 +224,11 @@ class Session(requests.Session):
             data=json.dumps(payload),
         )
         data = resp.json()
-        return self._handle_response(data)
+        status = data.get("status", "")
+        if status != "ok":
+            raise FlareSolverrResponseError(
+                data.get("message"), data, response=resp)
+        return data
 
     def _create_session(self):
         payload = {
@@ -227,18 +239,7 @@ class Session(requests.Session):
         if self._proxy:
             payload["proxy"] = self._proxy
 
-        try:
-            data = self.send(payload)
-        except Exception as exc:
-            raise FlareSolverrSessionError(
-                "Failed to create FlareSolverr session: %s" % exc
-            )
-
-        if data.get("status") != "ok":
-            raise FlareSolverrSessionError(
-                "Failed to create FlareSolverr session: %s"
-                % data.get("message", "unknown error")
-            )
+        data = self.send(payload)
 
         self._session_id = data.get("session", self._session_id)
         self._session_created = True
@@ -257,18 +258,6 @@ class Session(requests.Session):
             return  # Best-effort cleanup
 
         self._session_created = False
-
-    @staticmethod
-    def _raise_for_status(status, message):
-        msg_lower = message.lower() if message else ""
-
-        if "captcha" in msg_lower:
-            raise FlareSolverrCaptchaError(message)
-
-        if "timeout" in msg_lower:
-            raise FlareSolverrTimeoutError(message)
-
-        raise FlareSolverrChallengeError(message)
 
 
 class FlareSolverr(object):
@@ -295,7 +284,7 @@ class FlareSolverr(object):
 
     def __repr__(self):
         return "FlareSolverr(status=%r, message=%r, version=%r)" % (
-             self.status, self.message, self.version)
+            self.status, self.message, self.version)
 
 
 class Response(requests.Response):

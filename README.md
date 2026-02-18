@@ -65,14 +65,21 @@ A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`
 | `flaresolverr.version` | FlareSolverr server version |
 
 #### Exception Handling
+All exceptions defined in the module based on `FlareSolverrError`, which inherits from `requests.RequestException`. The inheritance hierarchy is as follows:
+
+    requests.RequestException
+    └── FlareSolverrError
+        ├── FlareSolverrResponseError
+        │   ├── FlareSolverrCaptchaError
+        │   └── FlareSolverrTimeoutError
+        └── FlareSolverrUnsupportedMethodError
+
 
 | Exception | Description |
 |---|---|
-| `FlareSolverrError` | Base exception. Inherits from `requests.exceptions.RequestException`. |
-| `FlareSolverrChallengeError` | Challenge could not be solved. |  
-| `FlareSolverrCaptchaError` | CAPTCHA detected. Inherits from `FlareSolverrChallengeError`. |
+| `FlareSolverrResponseError` | FlareSolverr returned an error response. The response dict is available as `response_data` attribute. |
+| `FlareSolverrCaptchaError` | CAPTCHA detected. |
 | `FlareSolverrTimeoutError` | Request timed out. |
-| `FlareSolverrSessionError` | Session creation/destruction failed. |
 | `FlareSolverrUnsupportedMethodError` | Unsupported HTTP method or content type. |
 
 ### Command-Line Interface

@@ -9,6 +9,7 @@ import os
 import sys
 
 from flaresolverr_rpc import RPC
+from flaresolverr_session import FlareSolverrResponseError
 
 
 def main(argv=None):
@@ -25,29 +26,33 @@ def main(argv=None):
     first_args, remaining = main_parser.parse_known_args(argv)
     command = first_args.command
 
-    if command == "session":
-        parser = _build_session_parser()
-        args = parser.parse_args([command] + remaining)
+    try:
+        if command == "session":
+            parser = _build_session_parser()
+            args = parser.parse_args([command] + remaining)
+            rpc = RPC(first_args.flaresolverr_url)
+            res = _handle_session(rpc, args)
+            format_output(res)
+            return 0
+
+        if command == "request":
+            request_argv = remaining
+        elif command is not None:
+            request_argv = [command] + remaining
+        else:
+            main_parser.print_help()
+            return 0
+
+        req_parser = _build_request_parser()
+        args = req_parser.parse_args(request_argv)
         rpc = RPC(first_args.flaresolverr_url)
-        res = _handle_session(rpc, args)
-        _format_output(res)
+        res = _handle_request(rpc, args)
+        _truncate_response_body(res)
+        format_output(res)
         return 0
-
-    if command == "request":
-        request_argv = remaining
-    elif command is not None:
-        request_argv = [command] + remaining
-    else:
-        main_parser.print_help()
-        return 0
-
-    req_parser = _build_request_parser()
-    args = req_parser.parse_args(request_argv)
-    rpc = RPC(first_args.flaresolverr_url)
-    res = _handle_request(rpc, args)
-    _truncate_response_body(res)
-    _format_output(res)
-    return 0
+    except FlareSolverrResponseError as exc:
+        format_output(exc.response_data, file=sys.stderr)
+        return 1
 
 
 def _build_main_parser():
@@ -284,8 +289,10 @@ def _truncate_response_body(data, max_length=200):
     return data
 
 
-def _format_output(data):
-    print(json.dumps(data, indent=2))
+def format_output(data, file=None):
+    if file is None:
+        file = sys.stdout
+    print(json.dumps(data, indent=2), file=file)
 
 
 if __name__ == "__main__":

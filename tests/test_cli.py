@@ -21,6 +21,12 @@ else:
     from StringIO import StringIO  # Python 2
 
 from cli import main, _truncate_response_body
+from flaresolverr_session import (
+    FlareSolverrResponseError,
+    FlareSolverrCaptchaError,
+    FlareSolverrTimeoutError,
+    FlareSolverrError,
+)
 
 
 def _fake_rpc():
@@ -87,27 +93,30 @@ def _fake_rpc():
 
 
 def _run_cli(argv, rpc=None):
-    """Run the CLI main() with mocked RPC and capture stdout.
+    """Run the CLI main() with mocked RPC and capture stdout/stderr.
 
     Parameters:
         argv (list of str): CLI arguments.
         rpc (mock.MagicMock or None): Optional pre-built mock RPC.
 
     Returns:
-        tuple: (exit_code, stdout_text, rpc_mock)
+        tuple: (exit_code, stdout_text, stderr_text, rpc_mock)
     """
     if rpc is None:
         rpc = _fake_rpc()
 
     with mock.patch("cli.RPC", return_value=rpc):
         old_stdout = sys.stdout
-        sys.stdout = captured = StringIO()
+        old_stderr = sys.stderr
+        sys.stdout = captured_out = StringIO()
+        sys.stderr = captured_err = StringIO()
         try:
             exit_code = main(argv)
         finally:
             sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
-    return exit_code, captured.getvalue(), rpc
+    return exit_code, captured_out.getvalue(), captured_err.getvalue(), rpc
 
 
 class TestSessionCreate(unittest.TestCase):
@@ -115,7 +124,7 @@ class TestSessionCreate(unittest.TestCase):
 
     def test_create_no_args(self):
         """session create with no extra args."""
-        code, out, rpc = _run_cli(["session", "create"])
+        code, out, _err, rpc = _run_cli(["session", "create"])
         self.assertEqual(code, 0)
         rpc.session.create.assert_called_once_with(session_id=None, proxy=None)
         data = json.loads(out)
@@ -123,19 +132,19 @@ class TestSessionCreate(unittest.TestCase):
 
     def test_create_with_name(self):
         """session create with a session name."""
-        code, out, rpc = _run_cli(["session", "create", "my-sess"])
+        code, out, _err, rpc = _run_cli(["session", "create", "my-sess"])
         self.assertEqual(code, 0)
         rpc.session.create.assert_called_once_with(session_id="my-sess", proxy=None)
 
     def test_create_with_proxy(self):
         """session create with --proxy."""
-        code, out, rpc = _run_cli(["session", "create", "--proxy", "http://p:80"])
+        code, out, _err, rpc = _run_cli(["session", "create", "--proxy", "http://p:80"])
         self.assertEqual(code, 0)
         rpc.session.create.assert_called_once_with(session_id=None, proxy="http://p:80")
 
     def test_create_with_name_and_proxy(self):
         """session create with name and proxy."""
-        code, out, rpc = _run_cli(
+        code, out, _err, rpc = _run_cli(
             ["session", "create", "sid", "--proxy", "http://p:80"]
         )
         self.assertEqual(code, 0)
@@ -161,7 +170,7 @@ class TestSessionList(unittest.TestCase):
 
     def test_list(self):
         """session list returns session list."""
-        code, out, rpc = _run_cli(["session", "list"])
+        code, out, _err, rpc = _run_cli(["session", "list"])
         self.assertEqual(code, 0)
         rpc.session.list.assert_called_once()
         data = json.loads(out)
@@ -173,7 +182,7 @@ class TestSessionDestroy(unittest.TestCase):
 
     def test_destroy(self):
         """session destroy passes the session id."""
-        code, out, rpc = _run_cli(["session", "destroy", "s1"])
+        code, out, _err, rpc = _run_cli(["session", "destroy", "s1"])
         self.assertEqual(code, 0)
         rpc.session.destroy.assert_called_once_with("s1")
         data = json.loads(out)
@@ -185,43 +194,47 @@ class TestRequestDefault(unittest.TestCase):
 
     def test_get_implicit(self):
         """URL as first arg sends a GET request."""
-        code, out, rpc = _run_cli(["https://example.com"])
+        code, out, _err, rpc = _run_cli(["https://example.com"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("https://example.com")
 
     def test_get_explicit_request(self):
         """Explicit 'request' command sends a GET request."""
-        code, out, rpc = _run_cli(["request", "https://example.com"])
+        code, out, _err, rpc = _run_cli(["request", "https://example.com"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("https://example.com")
 
     def test_get_with_method_flag(self):
         """Explicit -m GET."""
-        code, out, rpc = _run_cli(["https://example.com", "-m", "GET"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "-m", "GET"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("https://example.com")
 
     def test_post_with_data(self):
         """Data provided implies POST."""
-        code, out, rpc = _run_cli(["https://example.com", "-d", "foo=bar"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "-d", "foo=bar"])
         self.assertEqual(code, 0)
         rpc.request.post.assert_called_once_with("https://example.com", data="foo=bar")
 
     def test_post_explicit_method(self):
         """Explicit -m POST with data."""
-        code, out, rpc = _run_cli(["https://example.com", "-m", "POST", "-d", "x=1"])
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "-m", "POST", "-d", "x=1"]
+        )
         self.assertEqual(code, 0)
         rpc.request.post.assert_called_once_with("https://example.com", data="x=1")
 
     def test_post_explicit_no_data(self):
         """Explicit -m POST without data."""
-        code, out, rpc = _run_cli(["https://example.com", "-m", "POST"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "-m", "POST"])
         self.assertEqual(code, 0)
         rpc.request.post.assert_called_once_with("https://example.com", data=None)
 
     def test_get_explicit_method_override_data(self):
         """Explicit -m GET overrides implicit POST from data."""
-        code, out, rpc = _run_cli(["https://example.com", "-m", "GET", "-d", "foo=bar"])
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "-m", "GET", "-d", "foo=bar"]
+        )
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("https://example.com")
 
@@ -231,7 +244,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_session_id(self):
         """Request with -s session-id."""
-        code, out, rpc = _run_cli(["https://example.com", "-s", "my-session"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "-s", "my-session"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", session_id="my-session"
@@ -239,7 +252,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_timeout(self):
         """Request with -t timeout."""
-        code, out, rpc = _run_cli(["https://example.com", "-t", "30000"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "-t", "30000"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", max_timeout=30000
@@ -247,7 +260,9 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_proxy(self):
         """Request with --proxy."""
-        code, out, rpc = _run_cli(["https://example.com", "--proxy", "http://p:80"])
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "--proxy", "http://p:80"]
+        )
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", proxy="http://p:80"
@@ -255,7 +270,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_all_options(self):
         """Request with all options combined."""
-        code, out, rpc = _run_cli(
+        code, out, _err, rpc = _run_cli(
             [
                 "https://example.com",
                 "-s",
@@ -279,7 +294,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_session_ttl_minutes(self):
         """Request with --session-ttl-minutes."""
-        code, out, rpc = _run_cli(
+        code, out, _err, rpc = _run_cli(
             ["https://example.com", "--session-ttl-minutes", "30"]
         )
         self.assertEqual(code, 0)
@@ -289,7 +304,9 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_return_only_cookies(self):
         """Request with --return-only-cookies."""
-        code, out, rpc = _run_cli(["https://example.com", "--return-only-cookies"])
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "--return-only-cookies"]
+        )
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", return_only_cookies=True
@@ -297,7 +314,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_return_screenshot(self):
         """Request with --return-screenshot."""
-        code, out, rpc = _run_cli(["https://example.com", "--return-screenshot"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "--return-screenshot"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", return_screenshot=True
@@ -305,7 +322,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_wait_in_seconds(self):
         """Request with --wait."""
-        code, out, rpc = _run_cli(["https://example.com", "--wait", "5"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "--wait", "5"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", wait_in_seconds=5
@@ -313,7 +330,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_disable_media(self):
         """Request with --disable-media."""
-        code, out, rpc = _run_cli(["https://example.com", "--disable-media"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "--disable-media"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", disable_media=True
@@ -321,7 +338,7 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_all_new_options_combined(self):
         """Request with all new option flags combined."""
-        code, out, rpc = _run_cli(
+        code, out, _err, rpc = _run_cli(
             [
                 "https://example.com",
                 "--session-ttl-minutes",
@@ -426,13 +443,13 @@ class TestOutputIsJson(unittest.TestCase):
 
     def test_session_list_json(self):
         """session list output is valid JSON."""
-        code, out, rpc = _run_cli(["session", "list"])
+        code, out, _err, rpc = _run_cli(["session", "list"])
         data = json.loads(out)
         self.assertIn("sessions", data)
 
     def test_request_output_json(self):
         """request output is valid JSON."""
-        code, out, rpc = _run_cli(["https://example.com"])
+        code, out, _err, rpc = _run_cli(["https://example.com"])
         data = json.loads(out)
         self.assertIn("solution", data)
 
@@ -454,7 +471,7 @@ class TestOutputIsJson(unittest.TestCase):
             "startTimestamp": 100,
             "endTimestamp": 200,
         }
-        code, out, _ = _run_cli(["https://example.com"], rpc=rpc)
+        code, out, _err, _ = _run_cli(["https://example.com"], rpc=rpc)
         data = json.loads(out)
         self.assertIn("...[1000 letters]", data["solution"]["response"])
 
@@ -464,19 +481,19 @@ class TestTwoPassParsing(unittest.TestCase):
 
     def test_url_starting_with_http(self):
         """URL starting with http:// is treated as request."""
-        code, out, rpc = _run_cli(["http://example.com"])
+        code, out, _err, rpc = _run_cli(["http://example.com"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("http://example.com")
 
     def test_url_starting_with_https(self):
         """URL starting with https:// is treated as request."""
-        code, out, rpc = _run_cli(["https://example.com"])
+        code, out, _err, rpc = _run_cli(["https://example.com"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with("https://example.com")
 
     def test_request_keyword_explicit(self):
         """Explicit 'request' keyword works."""
-        code, out, rpc = _run_cli(["request", "https://example.com", "-d", "k=v"])
+        code, out, _err, rpc = _run_cli(["request", "https://example.com", "-d", "k=v"])
         self.assertEqual(code, 0)
         rpc.request.post.assert_called_once_with("https://example.com", data="k=v")
 
@@ -547,6 +564,129 @@ class TestTwoPassParsing(unittest.TestCase):
         finally:
             sys.stdout = old_stdout
         self.assertEqual(code, 0)
+
+
+class TestCliErrorHandling(unittest.TestCase):
+    """Tests for CLI error handling when FlareSolverr returns errors."""
+
+    def _make_rpc_raising(self, exc):
+        """Return a fake RPC whose request.get raises exc.
+
+        Parameters:
+            exc (Exception): The exception to raise.
+
+        Returns:
+            mock.MagicMock: Mocked RPC instance.
+        """
+        rpc = _fake_rpc()
+        rpc.request.get.side_effect = exc
+        rpc.request.post.side_effect = exc
+        return rpc
+
+    def test_response_error_exits_nonzero(self):
+        """FlareSolverrResponseError causes exit code 1."""
+        fake_resp = {"status": "error", "message": "Challenge not solved"}
+        exc = FlareSolverrResponseError("Challenge not solved", response_data=fake_resp)
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(code, 1)
+
+    def test_response_error_prints_response_json_to_stderr(self):
+        """When exc.response is set, its JSON is printed to stderr."""
+        fake_resp = {"status": "error", "message": "Challenge not solved"}
+        exc = FlareSolverrResponseError("Challenge not solved", response_data=fake_resp)
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(code, 1)
+        # Stdout should be empty (no normal output)
+        self.assertEqual(out.strip(), "")
+        # Stderr should contain the JSON response
+        data = json.loads(err)
+        self.assertEqual(data["status"], "error")
+        self.assertEqual(data["message"], "Challenge not solved")
+
+    def test_error_without_response_prints_message_to_stderr(self):
+        """When exc.response is None, the error message is printed to stderr."""
+        exc = FlareSolverrError("Connection refused")
+        rpc = self._make_rpc_raising(exc)
+        with self.assertRaises(FlareSolverrError) as ctx:
+            _run_cli(["https://example.com"], rpc=rpc)
+        e = ctx.exception
+        self.assertEqual(str(e), "Connection refused")
+
+    def test_captcha_error_exits_nonzero(self):
+        """FlareSolverrCaptchaError causes exit code 1."""
+        fake_resp = {"status": "error", "message": "Captcha detected"}
+        exc = FlareSolverrCaptchaError("Captcha detected", response_data=fake_resp)
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(code, 1)
+        data = json.loads(err)
+        self.assertEqual(data["message"], "Captcha detected")
+
+    def test_timeout_error_exits_nonzero(self):
+        """FlareSolverrTimeoutError causes exit code 1."""
+        fake_resp = {"status": "error", "message": "Error: Timeout reached"}
+        exc = FlareSolverrTimeoutError(
+            "Error: Timeout reached", response_data=fake_resp
+        )
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(code, 1)
+        data = json.loads(err)
+        self.assertIn("Timeout", data["message"])
+
+    def test_session_command_error_exits_nonzero(self):
+        """FlareSolverrResponseError during session command exits 1."""
+        fake_resp = {"status": "error", "message": "Session not found"}
+        exc = FlareSolverrResponseError("Session not found",
+                                        response_data=fake_resp)
+        rpc = _fake_rpc()
+        rpc.session.destroy.side_effect = exc
+        code, out, err, _ = _run_cli(["session", "destroy", "s1"], rpc=rpc)
+        self.assertEqual(code, 1)
+        data = json.loads(err)
+        self.assertEqual(data["message"], "Session not found")
+
+    def test_post_error_exits_nonzero(self):
+        """FlareSolverrResponseError on POST request exits 1."""
+        fake_resp = {"status": "error", "message": "Challenge not solved"}
+        exc = FlareSolverrResponseError("Challenge not solved",
+                                        response_data=fake_resp)
+        rpc = _fake_rpc()
+        rpc.request.post.side_effect = exc
+        code, out, err, _ = _run_cli(["https://example.com", "-d", "foo=bar"],
+                                     rpc=rpc)
+        self.assertEqual(code, 1)
+        data = json.loads(err)
+        self.assertEqual(data["status"], "error")
+
+    def test_stderr_is_json_with_full_response(self):
+        """All fields from the response dict appear in stderr JSON."""
+        fake_resp = {
+            "status": "error",
+            "message": "Challenge not solved",
+            "version": "3.3.21",
+            "startTimestamp": 100,
+            "endTimestamp": 200,
+        }
+        exc = FlareSolverrResponseError("Challenge not solved",
+                                        response_data=fake_resp)
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(code, 1)
+        data = json.loads(err)
+        self.assertEqual(data["version"], "3.3.21")
+        self.assertEqual(data["startTimestamp"], 100)
+        self.assertEqual(data["endTimestamp"], 200)
+
+    def test_stdout_empty_on_error(self):
+        """On error, nothing is written to stdout."""
+        fake_resp = {"status": "error", "message": "oops"}
+        exc = FlareSolverrResponseError("oops", response_data=fake_resp)
+        rpc = self._make_rpc_raising(exc)
+        code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
+        self.assertEqual(out.strip(), "")
 
 
 if __name__ == "__main__":
