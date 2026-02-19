@@ -254,18 +254,5 @@ class TestRequestPost(RPCTestCase):
         _assert_solution(result["solution"])
 
 
-class TestRPCContextManager(unittest.TestCase):
-    def test_context_manager_returns_rpc(self):
-        """The context manager yields the RPC instance itself."""
-        with RPC() as rpc:
-            assert isinstance(rpc, RPC)
-
-    def test_context_manager_executes_request(self):
-        """Requests work inside a context manager block."""
-        with RPC() as rpc:
-            result = rpc.session.list()
-            _assert_ok(result)
-
-
 if __name__ == "__main__":
     unittest.main()

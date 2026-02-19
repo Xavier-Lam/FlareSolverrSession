@@ -70,16 +70,14 @@ All exceptions defined in the module based on `FlareSolverrError`, which inherit
     requests.RequestException
     └── FlareSolverrError
         ├── FlareSolverrResponseError
-        │   ├── FlareSolverrCaptchaError
-        │   └── FlareSolverrTimeoutError
+        │   ├── FlareSolverrChallengeError
         └── FlareSolverrUnsupportedMethodError
 
 
 | Exception | Description |
 |---|---|
 | `FlareSolverrResponseError` | FlareSolverr returned an error response. The response dict is available as `response_data` attribute. |
-| `FlareSolverrCaptchaError` | CAPTCHA detected. |
-| `FlareSolverrTimeoutError` | Request timed out. |
+| `FlareSolverrChallengeError` | Challenge solving failed. |
 | `FlareSolverrUnsupportedMethodError` | Unsupported HTTP method or content type. |
 
 ### Command-Line Interface

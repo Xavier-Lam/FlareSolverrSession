@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
+import json
 import os
 
 try:
@@ -10,10 +11,86 @@ except ImportError:
 
 import requests
 
-from flaresolverr_session import Session
+
+__all__ = [
+    "RPC",
+    "SessionCommand",
+    "RequestCommand",
+    "FlareSolverrError",
+    "FlareSolverrResponseError",
+]
 
 
-__all__ = ["RPC", "SessionCommand", "RequestCommand"]
+class FlareSolverrError(requests.RequestException):
+    """Base exception for FlareSolverr errors."""
+
+
+class FlareSolverrResponseError(FlareSolverrError):
+    """Raised when FlareSolverr returns a non-ok response.
+
+    Attributes:
+        message (str): The error message from FlareSolverr.
+        response_data (dict or None): The original FlareSolverr response dict.
+    """
+
+    def __init__(self, message, response_data=None, **kwargs):
+        super(FlareSolverrResponseError, self).__init__(message, **kwargs)
+        self.message = message or ""
+        self.response_data = response_data
+
+
+class RPC(object):
+    """RPC client for FlareSolverr.
+
+    Provides two sub-command namespaces:
+
+    - :attr:`session` -- :class:`SessionCommand` for session management.
+    - :attr:`request` -- :class:`RequestCommand` for HTTP requests.
+
+    Parameters:
+        flaresolverr_url (str): The FlareSolverr API endpoint
+            (e.g. ``"http://localhost:8191/v1"``).
+        api_session (requests.Session or None): An optional pre-configured
+            session to use for API calls.
+    """
+
+    def __init__(self, flaresolverr_url=None, api_session=None):
+        if flaresolverr_url is None:
+            flaresolverr_url = os.environ.get(
+                "FLARESOLVERR_URL", "http://localhost:8191/v1"
+            )
+        if api_session is None:
+            api_session = requests.Session()
+
+        self._flaresolverr_url = flaresolverr_url
+        self._api_session = api_session
+        self.session = SessionCommand(self)
+        self.request = RequestCommand(self)
+
+    def send(self, payload):
+        """Send a JSON payload to the FlareSolverr endpoint.
+
+        Parameters:
+            payload (dict): The JSON-serialisable payload to send.
+
+        Returns:
+            dict: The parsed JSON response from FlareSolverr.
+
+        Raises:
+            FlareSolverrResponseError: If the response status is
+                not ``"ok"``.
+        """
+        headers = {"Content-Type": "application/json"}
+        resp = self._api_session.post(
+            self._flaresolverr_url,
+            headers=headers,
+            data=json.dumps(payload),
+        )
+        data = resp.json()
+        status = data.get("status", "")
+        if status != "ok":
+            raise FlareSolverrResponseError(data.get("message"), data, response=resp)
+        return data
 
 
 class SessionCommand(object):
@@ -59,7 +136,7 @@ class SessionCommand(object):
                 payload["proxy"] = proxy
             else:
                 payload["proxy"] = {"url": proxy}
-        return self._rpc._session.send(payload)
+        return self._rpc.send(payload)
 
     def list(self):
         """List all active FlareSolverr browser sessions.
@@ -78,7 +155,7 @@ class SessionCommand(object):
                   timestamp (ms).
         """
         payload = {"cmd": "sessions.list"}
-        return self._rpc._session.send(payload)
+        return self._rpc.send(payload)
 
     def destroy(self, session_id):
         """Destroy an existing FlareSolverr browser session.
@@ -102,7 +179,7 @@ class SessionCommand(object):
             "cmd": "sessions.destroy",
             "session": session_id,
         }
-        return self._rpc._session.send(payload)
+        return self._rpc.send(payload)
 
 
 class RequestCommand(object):
@@ -344,43 +421,4 @@ class RequestCommand(object):
         elif cmd == "request.post":
             # FlareSolverr requires postData for request.post; send empty string
             payload["postData"] = ""
-        return self._rpc._session.send(payload)
-
-
-class RPC(object):
-    """RPC client for FlareSolverr.
-
-    Provides two sub-command namespaces:
-
-    - :attr:`session` -- :class:`SessionCommand` for session management.
-    - :attr:`request` -- :class:`RequestCommand` for HTTP requests.
-
-    The underlying transport reuses
-    :meth:`flaresolverr_session.Session.send`, which is the same
-    low-level method used by the high-level
-    :class:`~flaresolverr_session.Session`.
-
-    Parameters:
-        flaresolverr_url (str): The FlareSolverr API endpoint
-            (e.g. ``"http://localhost:8191/v1"``).
-        api_session (requests.Session or None): An optional pre-configured
-            session to use for API calls.
-    """
-
-    def __init__(self, flaresolverr_url=None, api_session=None):
-        if flaresolverr_url is None:
-            flaresolverr_url = os.environ.get(
-                "FLARESOLVERR_URL", "http://localhost:8191/v1"
-            )
-        if api_session is None:
-            api_session = requests.Session()
-
-        self._session = Session(flaresolverr_url, session=api_session)
-        self.session = SessionCommand(self)
-        self.request = RequestCommand(self)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
+        return self._rpc.send(payload)

@@ -24,8 +24,6 @@ else:
 from cli import main, _truncate_response_body
 from flaresolverr_session import (
     FlareSolverrResponseError,
-    FlareSolverrCaptchaError,
-    FlareSolverrTimeoutError,
     FlareSolverrError,
 )
 
@@ -652,9 +650,9 @@ class TestCliErrorHandling(unittest.TestCase):
         self.assertEqual(str(e), "Connection refused")
 
     def test_captcha_error_exits_nonzero(self):
-        """FlareSolverrCaptchaError causes exit code 1."""
+        """FlareSolverrResponseError with captcha message causes exit code 1."""
         fake_resp = {"status": "error", "message": "Captcha detected"}
-        exc = FlareSolverrCaptchaError("Captcha detected", response_data=fake_resp)
+        exc = FlareSolverrResponseError("Captcha detected", response_data=fake_resp)
         rpc = self._make_rpc_raising(exc)
         code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
         self.assertEqual(code, 1)
@@ -662,9 +660,9 @@ class TestCliErrorHandling(unittest.TestCase):
         self.assertEqual(data["message"], "Captcha detected")
 
     def test_timeout_error_exits_nonzero(self):
-        """FlareSolverrTimeoutError causes exit code 1."""
+        """FlareSolverrResponseError with timeout message causes exit code 1."""
         fake_resp = {"status": "error", "message": "Error: Timeout reached"}
-        exc = FlareSolverrTimeoutError(
+        exc = FlareSolverrResponseError(
             "Error: Timeout reached", response_data=fake_resp
         )
         rpc = self._make_rpc_raising(exc)
