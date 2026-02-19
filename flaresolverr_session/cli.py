@@ -101,9 +101,8 @@ def _build_session_parser():
     create_parser = session_sub.add_parser("create", help="Create a session")
     create_parser.add_argument(
         "name",
-        nargs="?",
-        default=None,
-        help="Optional session name",
+        nargs="+",
+        help="One or more session names to create",
     )
     create_parser.add_argument(
         "--proxy",
@@ -216,10 +215,9 @@ def _handle_session(rpc, args):
     action = args.session_action
 
     if action == "create":
-        return rpc.session.create(
-            session_id=getattr(args, "name", None),
-            proxy=getattr(args, "proxy", None),
-        )
+        names = getattr(args, "name", None)
+        proxy = getattr(args, "proxy", None)
+        return [rpc.session.create(session_id=n, proxy=proxy) for n in names]
     elif action == "list":
         return rpc.session.list()
     elif action == "destroy":

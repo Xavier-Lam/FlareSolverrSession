@@ -132,23 +132,28 @@ class TestSessionCreate(unittest.TestCase):
 
     def test_create_no_args(self):
         """session create with no extra args."""
-        code, out, _err, rpc = _run_cli(["session", "create"])
-        self.assertEqual(code, 0)
-        rpc.session.create.assert_called_once_with(session_id=None, proxy=None)
-        data = json.loads(out)
-        self.assertEqual(data["status"], "ok")
+        with self.assertRaises(SystemExit):
+            main(["session", "create"])
 
     def test_create_with_name(self):
         """session create with a session name."""
         code, out, _err, rpc = _run_cli(["session", "create", "my-sess"])
         self.assertEqual(code, 0)
+        self.assertEqual(rpc.session.create.call_count, 1)
         rpc.session.create.assert_called_once_with(session_id="my-sess", proxy=None)
+        data = json.loads(out)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
 
     def test_create_with_proxy(self):
         """session create with --proxy."""
-        code, out, _err, rpc = _run_cli(["session", "create", "--proxy", "http://p:80"])
+        code, out, _err, rpc = _run_cli(
+            ["session", "create", "my-sess", "--proxy", "http://p:80"]
+        )
         self.assertEqual(code, 0)
-        rpc.session.create.assert_called_once_with(session_id=None, proxy="http://p:80")
+        rpc.session.create.assert_called_once_with(
+            session_id="my-sess", proxy="http://p:80"
+        )
 
     def test_create_with_name_and_proxy(self):
         """session create with name and proxy."""
@@ -167,10 +172,21 @@ class TestSessionCreate(unittest.TestCase):
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
-                main(["-f", "http://custom:9999/v1", "session", "create"])
+                main(["-f", "http://custom:9999/v1", "session", "create", "n1"])
             finally:
                 sys.stdout = old_stdout
             rpc_cls.assert_called_once_with("http://custom:9999/v1")
+
+    def test_create_with_multiple_names(self):
+        """session create with multiple names."""
+        code, out, _err, rpc = _run_cli(["session", "create", "a", "b"])
+        self.assertEqual(code, 0)
+        self.assertEqual(rpc.session.create.call_count, 2)
+        rpc.session.create.assert_any_call(session_id="a", proxy=None)
+        rpc.session.create.assert_any_call(session_id="b", proxy=None)
+        data = json.loads(out)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 2)
 
 
 class TestSessionList(unittest.TestCase):

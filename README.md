@@ -106,6 +106,9 @@ flaresolverr-cli https://example.com -d "key=value&foo=bar"
 # Create a session
 flaresolverr-cli -f http://localhost:8191/v1 session create my-session
 
+# Create multiple sessions at once
+flaresolverr-cli session create session1 session2 session3
+
 # List all active sessions
 flaresolverr-cli session list
 
