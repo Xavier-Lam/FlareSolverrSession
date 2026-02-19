@@ -103,7 +103,7 @@ flaresolverr-cli https://example.com -d "key=value&foo=bar"
 #### Managing sessions
 
 ```bash
-# Create a session (auto-generated name)
+# Create a session
 flaresolverr-cli -f http://localhost:8191/v1 session create my-session
 
 # List all active sessions
@@ -111,6 +111,9 @@ flaresolverr-cli session list
 
 # Destroy a session
 flaresolverr-cli session destroy my-session
+
+# Clear all sessions
+flaresolverr-cli session clear
 ```
 
 ### RPC Tool

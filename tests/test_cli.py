@@ -58,6 +58,14 @@ def _fake_rpc():
         "startTimestamp": 100,
         "endTimestamp": 200,
     }
+    rpc.session.clear.return_value = {
+        "status": "ok",
+        "message": "All sessions cleared successfully.",
+        "sessions": ["s1", "s2"],
+        "version": "3.3.21",
+        "startTimestamp": 100,
+        "endTimestamp": 200,
+    }
     rpc.request.get.return_value = {
         "status": "ok",
         "message": "Challenge solved!",
@@ -187,6 +195,22 @@ class TestSessionDestroy(unittest.TestCase):
         rpc.session.destroy.assert_called_once_with("s1")
         data = json.loads(out)
         self.assertEqual(data["status"], "ok")
+
+
+class TestSessionClear(unittest.TestCase):
+    """Tests for 'session clear' CLI command."""
+
+    def test_clear(self):
+        """session clear invokes RPC.session.clear()."""
+        code, out, _err, rpc = _run_cli(["session", "clear"])
+        self.assertEqual(code, 0)
+        rpc.session.list.assert_called_once()
+        self.assertEqual(rpc.session.destroy.call_count, 2)
+        rpc.session.destroy.assert_any_call("s1")
+        rpc.session.destroy.assert_any_call("s2")
+        data = json.loads(out)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 2)
 
 
 class TestRequestDefault(unittest.TestCase):

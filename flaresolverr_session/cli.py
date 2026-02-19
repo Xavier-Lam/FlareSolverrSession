@@ -121,6 +121,9 @@ def _build_session_parser():
         help="Session identifier to destroy",
     )
 
+    # session clear
+    session_sub.add_parser("clear", help="Destroy all sessions")
+
     return parser
 
 
@@ -221,6 +224,9 @@ def _handle_session(rpc, args):
         return rpc.session.list()
     elif action == "destroy":
         return rpc.session.destroy(args.session_id)
+    elif action == "clear":
+        payload = rpc.session.list()
+        return [rpc.session.destroy(s) for s in payload["sessions"]]
     else:
         raise ValueError("Unknown session action: %s" % action)
 
