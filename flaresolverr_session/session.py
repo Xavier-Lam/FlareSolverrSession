@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 import warnings
 
@@ -10,26 +10,12 @@ except ImportError:
 import requests
 from requests.structures import CaseInsensitiveDict
 
-from flaresolverr_rpc import RPC, FlareSolverrError, FlareSolverrResponseError
-
-__title__ = "flaresolverr-session"
-__description__ = "A requests.Session that proxies through a FlareSolverr instance."
-__url__ = "https://github.com/Xavier-Lam/FlareSolverrSession"
-__version__ = "0.2.1"
-__author__ = "Xavier-Lam"
-__author_email__ = "xavierlam7@hotmail.com"
-
-__all__ = ["Session", "FlareSolverr", "Response", "FlareSolverrError",
-           "FlareSolverrResponseError", "FlareSolverrChallengeError",
-           "FlareSolverrUnsupportedMethodError", "__version__"]
-
-
-class FlareSolverrChallengeError(FlareSolverrResponseError):
-    """Raised when a challenge could not be solved."""
-
-
-class FlareSolverrUnsupportedMethodError(FlareSolverrError):
-    """Raised when an unsupported HTTP method or content type is used."""
+from flaresolverr_session.rpc import RPC
+from flaresolverr_session.exceptions import (
+    FlareSolverrResponseError,
+    FlareSolverrChallengeError,
+    FlareSolverrUnsupportedMethodError,
+)
 
 
 class Session(requests.Session):
@@ -53,7 +39,7 @@ class Session(requests.Session):
         timeout (int or None): ``maxTimeout`` in **milliseconds**
             passed to FlareSolverr.  Defaults to *60000* (60 s).
         rpc (RPC or None): An optional pre-configured
-            :class:`~flaresolverr_rpc.RPC` instance.  When provided,
+            :class:`~flaresolverr_session.rpc.RPC` instance.  When provided,
             *flaresolverr_url* is ignored.
 
     .. note::
@@ -202,8 +188,7 @@ class Session(requests.Session):
 
     def _create_session(self):
         """Create a FlareSolverr browser session via RPC."""
-        data = self._rpc.session.create(session_id=self._session_id,
-                                        proxy=self._proxy)
+        data = self._rpc.session.create(session_id=self._session_id, proxy=self._proxy)
         self._session_id = data.get("session", self._session_id)
         self._session_created = True
 
@@ -231,8 +216,9 @@ class FlareSolverr(object):
         version (str): FlareSolverr server version.
     """
 
-    def __init__(self, status="", message="", user_agent="",
-                 start=0, end=0, version=""):
+    def __init__(
+        self, status="", message="", user_agent="", start=0, end=0, version=""
+    ):
         self.status = status
         self.message = message
         self.user_agent = user_agent
@@ -242,7 +228,10 @@ class FlareSolverr(object):
 
     def __repr__(self):
         return "FlareSolverr(status=%r, message=%r, version=%r)" % (
-            self.status, self.message, self.version)
+            self.status,
+            self.message,
+            self.version,
+        )
 
 
 class Response(requests.Response):

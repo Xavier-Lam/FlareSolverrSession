@@ -9,8 +9,8 @@ import json
 import os
 import sys
 
-from flaresolverr_rpc import RPC
-from flaresolverr_session import FlareSolverrResponseError
+from flaresolverr_session.rpc import RPC
+from flaresolverr_session.exceptions import FlareSolverrResponseError
 
 
 def main(argv=None):

@@ -2,7 +2,7 @@
 
 import unittest
 
-from flaresolverr_rpc import RPC
+from flaresolverr_session import RPC
 
 # Python 2/3 compatible string type check
 try:

@@ -21,7 +21,7 @@ if sys.version_info[0] >= 3:
 else:
     from StringIO import StringIO  # Python 2
 
-from cli import main, _truncate_response_body
+from flaresolverr_session.cli import main, _truncate_response_body
 from flaresolverr_session import (
     FlareSolverrResponseError,
     FlareSolverrError,
@@ -105,7 +105,7 @@ def _run_cli(argv, rpc=None):
     if rpc is None:
         rpc = _fake_rpc()
 
-    with mock.patch("cli.RPC", return_value=rpc):
+    with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         sys.stdout = captured_out = StringIO()
@@ -155,7 +155,7 @@ class TestSessionCreate(unittest.TestCase):
     def test_create_with_flaresolverr_url(self):
         """session create with -f flag."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
@@ -366,7 +366,7 @@ class TestRequestWithOptions(unittest.TestCase):
     def test_flaresolverr_url_passed_to_rpc(self):
         """The -f flag is forwarded to RPC constructor."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
@@ -378,7 +378,7 @@ class TestRequestWithOptions(unittest.TestCase):
     def test_flaresolverr_url_with_request_command(self):
         """The -f flag works with explicit request command."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
@@ -394,10 +394,15 @@ class TestRequestOutputFile(unittest.TestCase):
     def test_output_file(self):
         """Response body is written to file."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc):
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
             m = mock.mock_open()
             with mock.patch(
-                "cli.open" if sys.version_info[0] >= 3 else "__builtin__.open", m
+                (
+                    "flaresolverr_session.cli.open"
+                    if sys.version_info[0] >= 3
+                    else "__builtin__.open"
+                ),
+                m,
             ):
                 old_stdout = sys.stdout
                 sys.stdout = StringIO()
@@ -432,10 +437,15 @@ class TestRequestOutputFile(unittest.TestCase):
             "endTimestamp": 200,
         }
 
-        with mock.patch("cli.RPC", return_value=rpc):
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
             m = mock.mock_open()
             with mock.patch(
-                "cli.open" if sys.version_info[0] >= 3 else "__builtin__.open", m
+                (
+                    "flaresolverr_session.cli.open"
+                    if sys.version_info[0] >= 3
+                    else "__builtin__.open"
+                ),
+                m,
             ):
                 old_stdout = sys.stdout
                 sys.stdout = StringIO()
@@ -535,7 +545,7 @@ class TestTwoPassParsing(unittest.TestCase):
     def test_f_flag_before_command(self):
         """-f before session command."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
@@ -547,7 +557,7 @@ class TestTwoPassParsing(unittest.TestCase):
     def test_f_flag_before_url(self):
         """-f before URL (implicit request)."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:
@@ -560,7 +570,7 @@ class TestTwoPassParsing(unittest.TestCase):
     def test_f_flag_after_url(self):
         """-f after URL (implicit request)."""
         rpc = _fake_rpc()
-        with mock.patch("cli.RPC", return_value=rpc) as rpc_cls:
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc) as rpc_cls:
             old_stdout = sys.stdout
             sys.stdout = StringIO()
             try:

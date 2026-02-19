@@ -11,15 +11,16 @@ with io.open(os.path.join(this_directory, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
 package = dict()
-with io.open(os.path.join(this_directory, "flaresolverr_session.py"),
-             encoding="utf-8") as f:
+with io.open(
+    os.path.join(this_directory, "flaresolverr_session", "__init__.py"),
+    encoding="utf-8",
+) as f:
     for line in f:
         match = re.match(r"(__\w+?__)\s*=\s*(.+)$", line)
         if match and match.group(1) != "__all__":
             package[match.group(1)] = eval(match.group(2))
 
-package_name = os.environ.get("FLARESOLVERR_PACKAGE_NAME",
-                              package["__title__"])
+package_name = os.environ.get("FLARESOLVERR_PACKAGE_NAME", package["__title__"])
 
 setup(
     name=package_name,
@@ -31,14 +32,14 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="MIT",
-    py_modules=["flaresolverr_session", "flaresolverr_rpc", "cli"],
+    packages=["flaresolverr_session"],
     python_requires=">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*",
     install_requires=[
         "requests",
     ],
     entry_points={
         "console_scripts": [
-            "flaresolverr-cli=cli:main",
+            "flaresolverr-cli=flaresolverr_session.cli:main",
         ],
     },
     extras_require={

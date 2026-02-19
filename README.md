@@ -118,7 +118,7 @@ flaresolverr-cli session destroy my-session
 The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, useful when you need low-level access to the raw API responses.
 
 ```python
-from flaresolverr_rpc import RPC
+from flaresolverr_session import RPC
 
 with RPC("http://localhost:8191/v1") as rpc:
     # Session management
