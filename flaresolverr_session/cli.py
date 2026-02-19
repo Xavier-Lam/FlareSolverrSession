@@ -182,8 +182,9 @@ def _build_request_parser():
         help="Auto-rotate sessions older than this many minutes",
     )
     parser.add_argument(
-        "--return-only-cookies",
-        dest="return_only_cookies",
+        "-c",
+        "--cookies",
+        dest="cookies",
         action="store_true",
         default=False,
         help="Return only cookies, omitting the response body",
@@ -254,7 +255,7 @@ def _handle_request(rpc, args):
     session_ttl_minutes = getattr(args, "session_ttl_minutes", None)
     if session_ttl_minutes is not None:
         kwargs["session_ttl_minutes"] = session_ttl_minutes
-    if getattr(args, "return_only_cookies", False):
+    if getattr(args, "cookies", False):
         kwargs["return_only_cookies"] = True
     screenshot_path = getattr(args, "screenshot", None)
     if screenshot_path:
@@ -293,7 +294,7 @@ def _handle_request(rpc, args):
 
 def _truncate_response_body(data, max_length=200):
     solution = data["solution"]
-    body = solution["response"]
+    body = solution.get("response", "")
     if len(body) > max_length:
         solution["response"] = body[:max_length] + "...[%d letters]" % len(body)
     if solution.get("screenshot"):

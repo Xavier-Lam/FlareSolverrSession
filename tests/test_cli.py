@@ -343,10 +343,8 @@ class TestRequestWithOptions(unittest.TestCase):
         )
 
     def test_return_only_cookies(self):
-        """Request with --return-only-cookies."""
-        code, out, _err, rpc = _run_cli(
-            ["https://example.com", "--return-only-cookies"]
-        )
+        """Request with --cookies."""
+        code, out, _err, rpc = _run_cli(["https://example.com", "--cookies"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", return_only_cookies=True
@@ -385,7 +383,7 @@ class TestRequestWithOptions(unittest.TestCase):
                 "https://example.com",
                 "--session-ttl-minutes",
                 "15",
-                "--return-only-cookies",
+                "--cookies",
                 "--screenshot",
                 "ss.png",
                 "--wait",
