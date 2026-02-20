@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for flaresolverr_session.
 
-Requires a running FlareSolverr instance.  Set the ``FLARESOLVERR_URL``
-environment variable to point to it (defaults to
-``http://localhost:8191/v1``).  Optionally set ``FLARESOLVERR_PROXY``
-to route browser traffic through a proxy.
-
-Test categories:
-    1. Challenge sites – challenge solved, validate response.
-    2. No-challenge sites – plain fetch, validate response.
-    3. Unsolved challenge – mocked, exception raised.
-    4. Network error to FlareSolverr – exception raised.
-    5. Session destroy on close.
-    6. Auto-generated session id.
-    7. Session reuse (challenge token reuse).
-    8. Unsupported method / JSON POST.
-"""
-
-import os
 import unittest
 
 try:
@@ -35,340 +17,337 @@ from flaresolverr_session import (
     Session,
     Response,
 )
-from tests.testconf import CHALLENGE_SITES, NO_CHALLENGE_SITES
 
-FLARESOLVERR_URL = os.environ.get("FLARESOLVERR_URL", "http://localhost:8191/v1")
-FLARESOLVERR_PROXY = os.environ.get("FLARESOLVERR_PROXY")
+_DEFAULT_SESSION_ID = "mock-session-id"
 
 
-def _make_session(**kwargs):
-    """Create a Session with env-based defaults."""
-    kwargs.setdefault("flaresolverr_url", FLARESOLVERR_URL)
-    if FLARESOLVERR_PROXY and "proxy" not in kwargs:
-        kwargs["proxy"] = FLARESOLVERR_PROXY
-    return Session(**kwargs)
+def _ok_response(
+    url="https://example.com/",
+    body="<html>OK</html>",
+    status=200,
+    user_agent="MockAgent/1.0",
+    message="Challenge not detected!",
+):
+    """Build a minimal FlareSolverr 'ok' response dict."""
+    return {
+        "status": "ok",
+        "message": message,
+        "solution": {
+            "status": status,
+            "url": url,
+            "headers": {"content-type": "text/html"},
+            "response": body,
+            "cookies": [],
+            "userAgent": user_agent,
+        },
+        "startTimestamp": 1000,
+        "endTimestamp": 2000,
+        "version": "1.0.0",
+    }
 
 
-# -----------------------------------------------------------------------
-# Helpers to assert response quality
-# -----------------------------------------------------------------------
+def _make_mock_rpc(
+    session_id=_DEFAULT_SESSION_ID, get_response=None, post_response=None
+):
+    """Return a mock RPC object with sensible defaults."""
+    rpc = mock.MagicMock()
+    rpc.session.create.return_value = {"session": session_id}
+    rpc.session.destroy.return_value = {"status": "ok", "message": ""}
+    rpc.session.list.return_value = {"sessions": [session_id]}
+    rpc.request.get.return_value = get_response or _ok_response()
+    rpc.request.post.return_value = post_response or _ok_response()
+    return rpc
 
 
-def _assert_response(response, entry):
-    """Validate a requests.Response against a test-config entry."""
-    assert isinstance(response, requests.Response)
-
-    expected_status = entry.get("expected_status", 200)
-    assert response.status_code == expected_status, "Expected status %d, got %d" % (
-        expected_status,
-        response.status_code,
-    )
-
-    body = response.text.lower()
-    for kw in entry["expected_keywords"]:
-        assert kw.lower() in body, "Expected keyword %r not found in response body" % kw
-
-    # Comment out header assertions - FlareSolverr may return empty headers
-    # See https://github.com/FlareSolverr/FlareSolverr/issues/1162
-    for header, expected_value in entry.get("expected_headers", {}).items():
-        actual_value = response.headers.get(header)
-        # Soft assertion - only check if header is actually present
-        if actual_value and expected_value is not None:
-            assert (
-                expected_value.lower() in actual_value.lower()
-            ), "Header %r: expected %r in %r" % (header, expected_value, actual_value)
-            assert (
-                expected_value.lower() in actual_value.lower()
-            ), "Header %r: expected %r in %r" % (header, expected_value, actual_value)
+def _make_session(rpc=None, **kwargs):
+    """Create a Session backed by a mock RPC."""
+    if rpc is None:
+        rpc = _make_mock_rpc()
+    return Session(rpc=rpc, **kwargs)
 
 
-def _list_sessions(session=None):
-    data = session._rpc.session.list()
-    return data.get("sessions", [])
+class TestGetRouting(unittest.TestCase):
+    """session.get() must forward a correctly built call to rpc.request.get."""
+
+    def test_get_calls_rpc(self):
+        """session.get() invokes rpc.request.get exactly once."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/page")
+        rpc.request.get.assert_called_once()
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["url"], "https://example.com/page")
+
+    def test_get_passes_session_id(self):
+        """rpc.request.get receives the FlareSolverr session id."""
+        rpc = _make_mock_rpc(session_id="my-session")
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["session_id"], "my-session")
+
+    def test_get_returns_response(self):
+        """session.get() returns a Response built from rpc data."""
+        rpc = _make_mock_rpc(get_response=_ok_response(body="<html>Hello</html>"))
+        with _make_session(rpc=rpc) as session:
+            resp = session.get("https://example.com/")
+        self.assertIsInstance(resp, Response)
+        self.assertIn("Hello", resp.text)
+        self.assertEqual(resp.flaresolverr.status, "ok")
+
+    def test_get_passes_custom_timeout(self):
+        """Explicit timeout kwarg is forwarded as max_timeout."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/", timeout=30000)
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["max_timeout"], 30000)
+
+    def test_get_uses_session_default_timeout(self):
+        """Session-level timeout is used when no per-request timeout given."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc, timeout=45000) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["max_timeout"], 45000)
+
+    def test_get_passes_cookies(self):
+        """Cookies kwarg is forwarded to rpc.request.get."""
+        rpc = _make_mock_rpc()
+        cookies = [{"name": "tok", "value": "abc"}]
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/", cookies=cookies)
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["cookies"], cookies)
 
 
-# ===================================================================
-# 1. Challenge solved – configurable sites
-# ===================================================================
+class TestPostRouting(unittest.TestCase):
+    """session.post() must forward a correctly built call to rpc.request.post."""
 
+    def test_post_calls_rpc(self):
+        """session.post() invokes rpc.request.post exactly once."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/submit", data="a=1")
+        rpc.request.post.assert_called_once()
 
-class TestChallengeSolved(unittest.TestCase):
-    """Sites that present a challenge which FlareSolverr should solve."""
+    def test_post_passes_url(self):
+        """rpc.request.post receives the target URL."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/submit", data="a=1")
+        kwargs = rpc.request.post.call_args[1]
+        self.assertEqual(kwargs["url"], "https://example.com/submit")
 
-    pass
+    def test_post_passes_string_data(self):
+        """String post data is forwarded unchanged."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/", data="foo=bar")
+        kwargs = rpc.request.post.call_args[1]
+        self.assertEqual(kwargs["data"], "foo=bar")
 
+    def test_post_passes_dict_data(self):
+        """Dict post data is forwarded; encoding is handled by the RPC layer."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/", data={"x": "1"})
+        kwargs = rpc.request.post.call_args[1]
+        self.assertEqual(kwargs["data"], {"x": "1"})
 
-def _make_challenge_test(entry):
-    def test(self):
-        with _make_session() as session:
-            resp = session.get(entry["url"])
-            _assert_response(resp, entry)
-            # FlareSolverr reports "Challenge solved" or similar
-            assert resp.flaresolverr.status == "ok"
-            # Ensure the FlareSolverr message indicates a solved challenge
-            assert (
-                "challenge solved" in resp.flaresolverr.message.lower()
-            ), "Expected 'Challenge solved' in FlareSolverr message"
+    def test_post_passes_session_id(self):
+        """rpc.request.post receives the FlareSolverr session id."""
+        rpc = _make_mock_rpc(session_id="post-session")
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/", data="x=1")
+        kwargs = rpc.request.post.call_args[1]
+        self.assertEqual(kwargs["session_id"], "post-session")
 
-    test.__doc__ = "Challenge solved: %s" % entry["url"]
-    return test
-
-
-for _i, _entry in enumerate(CHALLENGE_SITES):
-    _test_name = "test_challenge_%s" % _entry["name"]
-    setattr(TestChallengeSolved, _test_name, _make_challenge_test(_entry))
-
-
-# ===================================================================
-# 2. No-challenge sites – should work without issues
-# ===================================================================
-
-
-class TestNoChallenge(unittest.TestCase):
-    """Sites that do not present a challenge."""
-
-    pass
-
-
-def _make_no_challenge_test(entry):
-    def test(self):
-        with _make_session() as session:
-            resp = session.get(entry["url"])
-            _assert_response(resp, entry)
-            assert resp.flaresolverr.status == "ok"
-
-    test.__doc__ = "No challenge: %s" % entry["url"]
-    return test
-
-
-for _i, _entry in enumerate(NO_CHALLENGE_SITES):
-    _test_name = "test_no_challenge_%s" % _entry["name"]
-    setattr(TestNoChallenge, _test_name, _make_no_challenge_test(_entry))
-
-
-# ===================================================================
-# 3. Unsolved challenge (mocked) – exception raised
-# ===================================================================
+    def test_post_returns_response(self):
+        """session.post() returns a Response built from rpc data."""
+        rpc = _make_mock_rpc(post_response=_ok_response(body="<html>Posted</html>"))
+        with _make_session(rpc=rpc) as session:
+            resp = session.post("https://example.com/", data="x=1")
+        self.assertIsInstance(resp, Response)
+        self.assertIn("Posted", resp.text)
 
 
 class TestUnsolvedChallenge(unittest.TestCase):
-    """Mock an unsolved challenge to verify exception handling."""
+    """rpc.request.get raising FlareSolverrResponseError triggers the right exceptions."""
+
+    def _make_error_rpc(self, message):
+        rpc = _make_mock_rpc()
+        fake_data = {
+            "status": "error",
+            "message": message,
+            "solution": {},
+            "startTimestamp": 0,
+            "endTimestamp": 0,
+            "version": "0.0.0",
+        }
+        rpc.request.get.side_effect = FlareSolverrResponseError(message, fake_data)
+        return rpc, fake_data
 
     def test_challenge_not_solved(self):
         """FlareSolverrChallengeError raised on failed challenge."""
-        fake_json = {
-            "status": "error",
-            "message": "Challenge not solved",
-            "solution": {},
-            "startTimestamp": 0,
-            "endTimestamp": 0,
-            "version": "0.0.0",
-        }
-        with _make_session() as session:
-            # Force session creation before mock
-            _ = session.session_id
-            with mock.patch.object(session._rpc._api_session, "post") as mocked_post:
-                mock_resp = mock.MagicMock()
-                mock_resp.json.return_value = fake_json
-                mocked_post.return_value = mock_resp
+        rpc, fake_data = self._make_error_rpc("Challenge not solved")
+        with _make_session(rpc=rpc) as session:
+            with self.assertRaises(FlareSolverrChallengeError) as ctx:
+                session.get("https://example.com")
+        self.assertEqual(ctx.exception.response_data, fake_data)
+        self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
+        self.assertEqual(ctx.exception.message, "Challenge not solved")
 
-                with self.assertRaises(FlareSolverrChallengeError) as ctx:
-                    session.get("https://example.com")
-                self.assertEqual(ctx.exception.response_data, fake_json)
-                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
-                self.assertEqual(ctx.exception.message, "Challenge not solved")
-
-    def test_captcha_detected(self):
+    def test_challenge_failed(self):
         """FlareSolverrChallengeError raised when captcha is detected."""
-        fake_json = {
-            "status": "error",
-            "message": ("Captcha detected but no automatic solver is configured."),
-            "solution": {},
-            "startTimestamp": 0,
-            "endTimestamp": 0,
-            "version": "0.0.0",
-        }
-        with _make_session() as session:
-            # Force session creation before mock
-            _ = session.session_id
-            with mock.patch.object(session._rpc._api_session, "post") as mocked_post:
-                mock_resp = mock.MagicMock()
-                mock_resp.json.return_value = fake_json
-                mocked_post.return_value = mock_resp
-
+        messages = (
+            "Captcha detected but no automatic solver is configured.",
+            "Error: Timeout reached",
+        )
+        for msg in messages:
+            rpc, fake_data = self._make_error_rpc(msg)
+            with _make_session(rpc=rpc) as session:
                 with self.assertRaises(FlareSolverrChallengeError) as ctx:
                     session.get("https://example.com")
-                self.assertEqual(ctx.exception.response_data, fake_json)
-                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
+            self.assertEqual(ctx.exception.response_data, fake_data)
+            self.assertEqual(ctx.exception.message, msg)
 
-    def test_timeout_error(self):
-        """FlareSolverrChallengeError raised on timeout."""
-        fake_json = {
-            "status": "error",
-            "message": "Error: Timeout reached",
-            "solution": {},
-            "startTimestamp": 0,
-            "endTimestamp": 0,
-            "version": "0.0.0",
-        }
-        with _make_session() as session:
-            # Force session creation before mock
-            _ = session.session_id
-            with mock.patch.object(session._rpc._api_session, "post") as mocked_post:
-                mock_resp = mock.MagicMock()
-                mock_resp.json.return_value = fake_json
-                mocked_post.return_value = mock_resp
-
-                with self.assertRaises(FlareSolverrChallengeError) as ctx:
-                    session.get("https://example.com")
-                self.assertEqual(ctx.exception.response_data, fake_json)
-                self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
-
-
-# ===================================================================
-# 4. Network error to FlareSolverr service
-# ===================================================================
+    def test_non_challenge_error_not_wrapped(self):
+        """A non-challenge FlareSolverrResponseError is re-raised as-is."""
+        rpc = _make_mock_rpc()
+        fake_data = {"status": "error", "message": "Internal server error"}
+        rpc.request.get.side_effect = FlareSolverrResponseError(
+            "Internal server error", fake_data
+        )
+        with _make_session(rpc=rpc) as session:
+            with self.assertRaises(FlareSolverrResponseError) as ctx:
+                session.get("https://example.com")
+        # Must NOT be re-wrapped as FlareSolverrChallengeError
+        self.assertNotIsInstance(ctx.exception, FlareSolverrChallengeError)
 
 
 class TestNetworkError(unittest.TestCase):
-    """Verify that a network error to FlareSolverr is raised properly."""
+    """Verify that a network error from the RPC layer propagates correctly."""
 
-    def test_connection_error(self):
-        """A network-level error propagates as a requests exception."""
-        # Use a URL that will definitely not have a FlareSolverr running.
-        # The underlying requests library raises ConnectionError (not a
-        # FlareSolverrError) when the host is unreachable.
-        import requests as _requests
-
-        with self.assertRaises(_requests.exceptions.RequestException):
-            session = _make_session(
-                flaresolverr_url="http://127.0.0.1:1/v1",
-                proxy=None,
-            )
-            # Trigger session creation
+    def test_connection_error_on_session_create(self):
+        """ConnectionError from rpc.session.create propagates out of session_id."""
+        rpc = _make_mock_rpc()
+        rpc.session.create.side_effect = requests.exceptions.ConnectionError(
+            "Connection refused"
+        )
+        session = Session(rpc=rpc)
+        with self.assertRaises(requests.exceptions.RequestException):
             _ = session.session_id
 
+    def test_connection_error_on_request(self):
+        """ConnectionError from rpc.request.get propagates out of session.get()."""
+        rpc = _make_mock_rpc()
+        rpc.request.get.side_effect = requests.exceptions.ConnectionError(
+            "Connection refused"
+        )
+        with Session(rpc=rpc) as session:
+            with self.assertRaises(requests.exceptions.RequestException):
+                session.get("https://example.com")
 
-# ===================================================================
-# 5. Session destroy on close
-# ===================================================================
 
+class TestSessionLifecycle(unittest.TestCase):
+    """Validate session creation and destruction around the RPC layer."""
 
-class TestSessionDestroy(unittest.TestCase):
-    """Validate that the FlareSolverr session is destroyed on close."""
-
-    def test_session_destroyed_on_close(self):
-        """Session no longer listed after close()."""
-        session = _make_session()
-        sid = session.session_id
-        # List sessions via direct API call
-        sessions_before = _list_sessions(session)
-        assert sid in sessions_before, "Session %s should exist before close" % sid
-        session.close()
-        # After close, list sessions via a fresh API call
-        sessions_after = _list_sessions(session)
-        assert sid not in sessions_after, "Session %s should have been destroyed" % sid
-
-    def test_destroy_with_given_session_id(self):
-        """Provided `session_id` should be destroyed on close()."""
-        # Use an explicit session id when creating the session
-        session = _make_session(session_id="test-destroy-id")
+    def test_session_created_on_first_access(self):
+        """rpc.session.create is called exactly once on first session_id access."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
         try:
-            sid = session.session_id
-            assert sid == "test-destroy-id"
-            sessions_before = _list_sessions(session)
-            assert sid in sessions_before, "Session %s should exist before close" % sid
+            _ = session.session_id
+            _ = session.session_id  # second access must not re-create
         finally:
             session.close()
+        rpc.session.create.assert_called_once()
 
-        # After close, list sessions via a fresh API call
-        sessions_after = _list_sessions(session)
-        assert sid not in sessions_after, "Session %s should have been destroyed" % sid
+    def test_session_created_lazily_by_request(self):
+        """rpc.session.create is called when the first request triggers it."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        rpc.session.create.assert_not_called()
+        session.get("https://example.com/")
+        rpc.session.create.assert_called_once()
+        session.close()
 
+    def test_session_destroyed_on_close(self):
+        """close() calls rpc.session.destroy with the correct session id."""
+        rpc = _make_mock_rpc(session_id="to-destroy")
+        session = Session(rpc=rpc)
+        sid = session.session_id
+        session.close()
+        rpc.session.destroy.assert_called_once_with(sid)
 
-# ===================================================================
-# 6. Auto-generated session id
-# ===================================================================
+    def test_destroy_not_called_if_never_created(self):
+        """close() does not call rpc.session.destroy if no session was created."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        session.close()
+        rpc.session.destroy.assert_not_called()
+
+    def test_destroy_with_given_session_id(self):
+        """Explicit session_id is destroyed on close()."""
+        rpc = _make_mock_rpc(session_id="explicit-id")
+        session = Session(rpc=rpc, session_id="explicit-id")
+        sid = session.session_id
+        self.assertEqual(sid, "explicit-id")
+        session.close()
+        rpc.session.destroy.assert_called_once_with("explicit-id")
 
 
 class TestAutoSession(unittest.TestCase):
-    """When no session_id is given, one is auto-generated."""
+    """When no session_id is given, one is returned by rpc.session.create."""
 
-    def test_auto_session_id_created(self):
-        """An auto-generated session appears in FlareSolverr."""
-        session = _make_session()
+    def test_auto_session_id_returned_from_rpc(self):
+        """session_id is taken from the rpc.session.create response."""
+        rpc = _make_mock_rpc(session_id="auto-abc-123")
+        session = Session(rpc=rpc)
         try:
-            assert session.session_id is not None
-            assert len(session.session_id) > 0
-            # List sessions via direct API call
-            sessions = _list_sessions(session)
-            assert session.session_id in sessions
+            sid = session.session_id
+            self.assertEqual(sid, "auto-abc-123")
+        finally:
+            session.close()
+
+    def test_session_id_is_stable(self):
+        """Repeated access to session_id always returns the same value."""
+        rpc = _make_mock_rpc(session_id="stable-id")
+        session = Session(rpc=rpc)
+        try:
+            self.assertEqual(session.session_id, session.session_id)
         finally:
             session.close()
 
 
-# ===================================================================
-# 7. Session reuse (challenge token reuse)
-# ===================================================================
-
-
 class TestSessionReuse(unittest.TestCase):
-    """Verify session reuse by comparing timing of repeated requests.
+    """Both RPC calls within one Session must carry the same session_id."""
 
-    The first request may need to solve a challenge (slow).  The
-    second request to the same site should reuse the session cookies
-    and be noticeably faster because no challenge-solving is needed.
-    """
+    def test_get_reuses_session_id(self):
+        """Two subsequent GET calls share the same session_id."""
+        rpc = _make_mock_rpc(session_id="reuse-id")
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/1")
+            session.get("https://example.com/2")
 
-    def test_session_reuse(self):
-        """Second request should be faster (session cookies reused)."""
-        if not NO_CHALLENGE_SITES:
-            self.skipTest("No NO_CHALLENGE_SITES configured")
+        calls = rpc.request.get.call_args_list
+        self.assertEqual(len(calls), 2)
+        ids = [c[1]["session_id"] for c in calls]
+        self.assertEqual(ids[0], ids[1])
+        self.assertEqual(ids[0], "reuse-id")
 
-        entry = NO_CHALLENGE_SITES[0]
+    def test_post_reuses_session_id(self):
+        """A GET followed by a POST share the same session_id."""
+        rpc = _make_mock_rpc(session_id="reuse-post")
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/")
+            session.post("https://example.com/", data="x=1")
 
-        with _make_session() as session:
-            # First request – may include cold start
-            resp1 = session.get(entry["url"])
-            _assert_response(resp1, entry)
-
-            # Second request – should reuse cookies / session
-            resp2 = session.get(entry["url"])
-
-            _assert_response(resp2, entry)
-
-            # The second request generally should not be dramatically
-            # slower. We simply assert both succeeded via the same
-            # session id and that we can reach the target.
-            assert resp1.flaresolverr.status == "ok"
-            assert resp2.flaresolverr.status == "ok"
-
-    def test_challenge_session_reuse(self):
-        """Challenge sites: second request reuses solved session."""
-        if not CHALLENGE_SITES:
-            self.skipTest("No CHALLENGE_SITES configured")
-
-        entry = CHALLENGE_SITES[0]
-
-        with _make_session() as session:
-            # First request – solves the challenge
-            resp1 = session.get(entry["url"])
-            _assert_response(resp1, entry)
-
-            # Second request – should reuse cookies
-            # FlareSolverr returns "Challenge not detected!" when reusing
-            resp2 = session.get(entry["url"])
-            _assert_response(resp2, entry)
-
-            assert resp1.flaresolverr.status == "ok"
-            assert resp2.flaresolverr.status == "ok"
-            # Check that challenge was not detected on second request
-            assert "challenge not detected" in resp2.flaresolverr.message.lower()
-
-
-# ===================================================================
-# 8. Unsupported method / JSON POST
-# ===================================================================
+        get_sid = rpc.request.get.call_args[1]["session_id"]
+        post_sid = rpc.request.post.call_args[1]["session_id"]
+        self.assertEqual(get_sid, post_sid)
+        self.assertEqual(get_sid, "reuse-post")
 
 
 class TestUnsupportedMethod(unittest.TestCase):
@@ -401,85 +380,79 @@ class TestUnsupportedMethod(unittest.TestCase):
                     json={"key": "value"},
                 )
 
-    def test_form_post_succeeds(self):
-        """x-www-form-urlencoded POST should not raise."""
-        with _make_session() as session:
-            # httpbin.org echoes POST data back
-            resp = session.post(
-                "https://httpbin.org/post",
-                data="foo=bar&baz=qux",
-            )
-            assert resp.flaresolverr.status == "ok"
-            # httpbin returns the form data in the response
-            assert "foo" in resp.text
+    def test_unsupported_method_does_not_call_rpc(self):
+        """RPC must not be invoked for unsupported methods."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            try:
+                session.request("PUT", "https://example.com")
+            except FlareSolverrUnsupportedMethodError:
+                pass
+        rpc.request.get.assert_not_called()
+        rpc.request.post.assert_not_called()
 
-    def test_form_post_dict_succeeds(self):
-        """POST with dict data should be form-encoded."""
-        with _make_session() as session:
-            resp = session.post(
-                "https://httpbin.org/post",
-                data={"foo": "bar", "baz": "qux"},
-            )
-            assert resp.flaresolverr.status == "ok"
-            assert "foo" in resp.text
+    def test_form_post_string_calls_rpc(self):
+        """String-body POST reaches rpc.request.post without raising."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            resp = session.post("https://example.com/", data="foo=bar&baz=qux")
+        rpc.request.post.assert_called_once()
+        self.assertEqual(resp.flaresolverr.status, "ok")
 
-
-# ===================================================================
-# URL params tests
-# ===================================================================
+    def test_form_post_dict_calls_rpc(self):
+        """Dict-body POST reaches rpc.request.post without raising."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            resp = session.post("https://example.com/", data={"foo": "bar"})
+        rpc.request.post.assert_called_once()
+        self.assertEqual(resp.flaresolverr.status, "ok")
 
 
 class TestURLParams(unittest.TestCase):
     """Tests for URL query parameter handling."""
 
-    def test_params_dict_added_to_url(self):
-        """Params dict should be URL-encoded and added to the query string."""
-        with _make_session() as session:
-            # httpbin.org/get echoes back the query parameters
-            resp = session.get(
-                "https://httpbin.org/get",
-                params={"foo": "bar", "baz": "qux"},
-            )
-            assert resp.flaresolverr.status == "ok"
-            # httpbin returns the args in the response
-            assert "foo" in resp.text
-            assert "bar" in resp.text
-            assert "baz" in resp.text
-            assert "qux" in resp.text
+    def _get_url(self, rpc):
+        """Return the URL forwarded to rpc.request.get."""
+        return rpc.request.get.call_args[1]["url"]
 
-    def test_params_added_to_existing_query_string(self):
-        """Params should be appended to existing query string."""
-        with _make_session() as session:
-            resp = session.get(
-                "https://httpbin.org/get?existing=param",
-                params={"new": "value"},
-            )
-            assert resp.flaresolverr.status == "ok"
-            # Both existing and new params should be present
-            assert "existing" in resp.text
-            assert "param" in resp.text
-            assert "new" in resp.text
-            assert "value" in resp.text
+    def _post_url(self, rpc):
+        """Return the URL forwarded to rpc.request.post."""
+        return rpc.request.post.call_args[1]["url"]
+
+    def test_params_dict_appended_to_clean_url(self):
+        """Params dict is URL-encoded and appended with '?'."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/get", params={"foo": "bar"})
+        url = self._get_url(rpc)
+        self.assertIn("?", url)
+        self.assertIn("foo=bar", url)
+
+    def test_params_dict_appended_to_existing_query(self):
+        """Params are appended with '&' when the URL already has a query."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/get?existing=1", params={"new": "2"})
+        url = self._get_url(rpc)
+        self.assertIn("existing=1", url)
+        self.assertIn("new=2", url)
+        self.assertIn("&", url)
+
+    def test_no_params_url_unchanged(self):
+        """URL is passed through unchanged when no params given."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/page")
+        url = self._get_url(rpc)
+        self.assertEqual(url, "https://example.com/page")
 
     def test_post_with_params(self):
-        """POST request should also support params in URL."""
-        with _make_session() as session:
-            resp = session.post(
-                "https://httpbin.org/post",
-                params={"query": "param"},
-                data={"form": "data"},
-            )
-            assert resp.flaresolverr.status == "ok"
-            # Query param should be in the URL args
-            assert "query" in resp.text
-            assert "param" in resp.text
-            # Form data should be in the form section
-            assert "form" in resp.text
-
-
-# ===================================================================
-# Response building tests
-# ===================================================================
+        """POST also supports params in the URL."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.post("https://example.com/", params={"q": "test"}, data="x=1")
+        url = self._post_url(rpc)
+        self.assertIn("q=test", url)
 
 
 class TestResponseBuilding(unittest.TestCase):
@@ -506,50 +479,51 @@ class TestResponseBuilding(unittest.TestCase):
         }
 
         resp = Response(fake_json)
-        assert resp.status_code == 200
-        assert "Example" in resp.text
-        assert resp.headers.get("Content-Type") == "text/html"
-        assert resp.url == "https://example.com/"
-        assert resp.flaresolverr.status == "ok"
-        assert resp.flaresolverr.message == "Challenge solved"
-        assert resp.flaresolverr.user_agent == "TestAgent/1.0"
-        assert resp.flaresolverr.start == 100
-        assert resp.flaresolverr.end == 200
-        assert resp.flaresolverr.version == "1.2.3"
-        assert resp.cookies.get("a") == "1"
-
-
-# ===================================================================
-# Exception hierarchy tests
-# ===================================================================
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Example", resp.text)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/html")
+        self.assertEqual(resp.url, "https://example.com/")
+        self.assertEqual(resp.flaresolverr.status, "ok")
+        self.assertEqual(resp.flaresolverr.message, "Challenge solved")
+        self.assertEqual(resp.flaresolverr.user_agent, "TestAgent/1.0")
+        self.assertEqual(resp.flaresolverr.start, 100)
+        self.assertEqual(resp.flaresolverr.end, 200)
+        self.assertEqual(resp.flaresolverr.version, "1.2.3")
+        self.assertEqual(resp.cookies.get("a"), "1")
 
 
 class TestExceptionHierarchy(unittest.TestCase):
     """Ensure exception classes have the correct inheritance."""
 
     def test_base_inherits_from_requests(self):
-        assert issubclass(FlareSolverrError, requests.exceptions.RequestException)
+        self.assertTrue(
+            issubclass(FlareSolverrError, requests.exceptions.RequestException)
+        )
 
     def test_response_error_inherits_from_base(self):
-        assert issubclass(FlareSolverrResponseError, FlareSolverrError)
+        self.assertTrue(issubclass(FlareSolverrResponseError, FlareSolverrError))
 
     def test_challenge_error_inherits_from_response_error(self):
-        assert issubclass(FlareSolverrChallengeError, FlareSolverrResponseError)
+        self.assertTrue(
+            issubclass(FlareSolverrChallengeError, FlareSolverrResponseError)
+        )
 
     def test_unsupported_method_error(self):
-        assert issubclass(FlareSolverrUnsupportedMethodError, FlareSolverrError)
+        self.assertTrue(
+            issubclass(FlareSolverrUnsupportedMethodError, FlareSolverrError)
+        )
 
     def test_response_error_carries_response_dict(self):
         """FlareSolverrResponseError stores the raw response."""
         data = {"status": "error", "message": "oops"}
         exc = FlareSolverrResponseError("oops", response_data=data)
-        assert exc.response_data is data
+        self.assertIs(exc.response_data, data)
 
     def test_challenge_error_carries_response_dict(self):
         """FlareSolverrChallengeError stores the raw response."""
         data = {"status": "error", "message": "challenge"}
         exc = FlareSolverrChallengeError("challenge", response_data=data)
-        assert exc.response_data is data
+        self.assertIs(exc.response_data, data)
 
 
 if __name__ == "__main__":

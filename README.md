@@ -8,7 +8,7 @@ A [`requests.Session`](https://docs.python-requests.org/) that transparently rou
 
 The package also provides a more powerful [Adapter](#adapter) to handle complex requests if the `Session` is not sufficient.
 
-The project ships with a RPC client for direct access to the FlareSolverr JSON API, and a command-line interface (CLI) for quick requests and session management.
+The project ships with a command-line interface (CLI) for requests and session management, and an RPC client for direct access to the FlareSolverr JSON API.
 
 This project is not responsible for solving challenges itself, it only forwards requests to *FlareSolverr*. If *FlareSolverr* fails to solve a challenge, it will raise an exception. Any issues related to challenge solving should be reported to the *FlareSolverr* project.
 
@@ -56,7 +56,7 @@ session = Session(
 ```
 
 #### Response Object
-A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`. It contains metadata about the request and challenge solving process returned by *FlareSolverr*.
+A `FlareSolverr` metadata object is attached to the `response` as `response.flaresolverr`. It contains details about the request and the challenge solving process returned by *FlareSolverr*.
 
 | Attribute | Description |
 |---|---|
@@ -67,7 +67,9 @@ A `FlareSolverr` object is attached to the `response` as `response.flaresolverr`
 | `flaresolverr.version` | FlareSolverr server version |
 
 #### Exception Handling
-All exceptions defined in the module based on `FlareSolverrError`, which inherits from `requests.RequestException`. The inheritance hierarchy is as follows:
+If `FlareSolverr` returns an error response, the session will raise a `FlareSolverrResponseError` exception.
+
+All exceptions defined in the module are based on `FlareSolverrError`, which inherits from `requests.RequestException`. The hierarchy is as follows:
 
     requests.RequestException
     └── FlareSolverrError
@@ -75,18 +77,18 @@ All exceptions defined in the module based on `FlareSolverrError`, which inherit
         │   └── FlareSolverrChallengeError
         └── FlareSolverrUnsupportedMethodError
 
-Here are the explanations of each exception:
+Exception Details:
 
 | Exception | Description |
 |---|---|
 | `FlareSolverrResponseError` | FlareSolverr returned an error response. The response dict is available as `response_data` attribute. |
-| `FlareSolverrChallengeError` | Challenge solving failed. |
+| `FlareSolverrChallengeError` | Challenge solving failed, raised only in `Session`. |
 | `FlareSolverrUnsupportedMethodError` | Unsupported HTTP method or content type. |
 
 #### Limitations
 
 - **Only GET and  `application/x-www-form-urlencoded` POST** are supported. Otherwise, it will raise `FlareSolverrUnsupportedMethodError`. 
-- **Headers returned by FlareSolverr** may be empty for some sites, depending on the FlareSolverr version and configuration. Empty HTTP status will be regarded as `200`. See [FlareSolverr#1162](https://github.com/FlareSolverr/FlareSolverr/issues/1162).
+- **Headers returned by FlareSolverr may be empty** for some sites, depending on the FlareSolverr version and configuration. An empty HTTP status will be treated as `200`. See [FlareSolverr#1162](https://github.com/FlareSolverr/FlareSolverr/issues/1162).
 
 > If you need more control over the requests or want to use unsupported methods/content types, consider using the [Adapter](#adapter) instead.
 
@@ -94,7 +96,7 @@ Here are the explanations of each exception:
 
 After installation, you can use the `flaresolverr-cli` command. It is a convenient CLI tool to send HTTP requests through FlareSolverr and manage sessions.
 
-It will output json response from FlareSolverr. If the FlareSolverr URL is not provided via `-f`, it will use the `FLARESOLVERR_URL` environment variable (defaulting to `http://localhost:8191/v1`).
+It prints the json response from FlareSolverr. If the FlareSolverr URL is not provided via `-f`, it will use the `FLARESOLVERR_URL` environment variable (defaulting to `http://localhost:8191/v1`).
 
 #### Sending requests
 
@@ -130,7 +132,7 @@ flaresolverr-cli session clear
 ```
 
 ### Adapter
-If your request is more complex than ordinary `GET` or form `POST`, the module provides an adapter to retrieve Cloudflare challenge solutions from *FlareSolverr* and apply them to your requests without needing to modify your existing codebase.
+If your requests are more complex than standard `GET` or form `POST`, the module provides an adapter to retrieve Cloudflare challenge solutions from *FlareSolverr* and apply them to your requests without modifying your existing codebase.
 
 ```python
 import requests
@@ -151,23 +153,23 @@ It is recommended only mount the adapter to specific origins that require Cloudf
 
 #### Caveats
 
-* The *FlareSolverr* instance and the machine running the adapter **must share the same outbound IP** (or use the same proxy with a consistent outbound IP). Otherwise the cookies obtained from *FlareSolverr* will not be accepted by Cloudflare.
-* Proxy used for the original request is automatically applied to the *FlareSolverr* request for the reason mentioned above.
-* The adapter automatically use a `GET` request to the original URL to trigger the challenge. You can provide a custom `challenge_url` to override this behavior.
+* The *FlareSolverr* instance and the machine running the adapter **must share the same public IP** (or use the same proxy with a consistent public IP). Otherwise the cookies obtained from *FlareSolverr* will not be accepted by Cloudflare.
+* The proxy used for the original request is automatically applied to the *FlareSolverr* request for the reason mentioned above.
+* The adapter automatically sends a `GET` request to the original URL to solve the challenge. You can provide a custom `challenge_url` to override this behavior.
 * Cloudflare cookies are tied to the `User-Agent` used during challenge solving. The adapter automatically sets the `User-Agent` returned by FlareSolverr.
-* It is less reliable than using the `Session` directly.
+* The adapter is less reliable than using the [Session](#basic-usage) directly.
 
 #### How It Works
 
-1. The adapter sends the request normally through its base adapter.
+1. The adapter first attempts to send the request normally through its base adapter.
 2. If it detects a Cloudflare challenge, the adapter forwards the URL to a FlareSolverr instance.
 3. FlareSolverr solves the challenge and returns cookies and a `User-Agent`.
-4. The adapter uses the returned cookies and `User-Agent` to retry the original request.
+4. The adapter retries the original request using the returned credentials.
 
 
 ### RPC Tool
 
-The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, useful when you need low-level access to the raw API responses.
+The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, ideal for low-level access to raw API responses.
 
 ```python
 from flaresolverr_session import RPC
