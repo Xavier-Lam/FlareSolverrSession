@@ -768,5 +768,54 @@ class TestCliErrorHandling(unittest.TestCase):
         self.assertEqual(out.strip(), "")
 
 
+class TestCliArgumentsBeforeUrl(unittest.TestCase):
+    def test_arguments_before_url(self):
+        """``--proxy http://p:80 https://example.com`` works."""
+        code, out, _err, rpc = _run_cli(
+            ["--proxy", "http://p:80", "https://example.com"]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://example.com", proxy="http://p:80"
+        )
+
+    def test_f_and_arguments_before_url(self):
+        """-f <url> --proxy <proxy> <target> works."""
+        code, out, _err, rpc = _run_cli(
+            [
+                "-f",
+                "http://localhost:8888/v1",
+                "--proxy",
+                "http://localhost:10809",
+                "https://www.example.com/en/",
+            ]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://www.example.com/en/", proxy="http://localhost:10809"
+        )
+
+    def test_arguments_between_flags(self):
+        """``--proxy`` between other flags and URL."""
+        code, out, _err, rpc = _run_cli(
+            ["-t", "5000", "--proxy", "http://p:80", "https://example.com"]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://example.com", max_timeout=5000, proxy="http://p:80"
+        )
+
+    def test_help_display(self):
+        """``--help`` displays help text and exits zero."""
+        code, out, _err, _rpc = _run_cli([])
+        self.assertEqual(code, 0)
+        self.assertIn("flaresolverr", out.lower())
+
+    def test_request_help(self):
+        """``request --help`` exits with SystemExit (argparse behaviour)."""
+        with self.assertRaises(SystemExit):
+            _run_cli(["request", "--help"])
+
+
 if __name__ == "__main__":
     unittest.main()

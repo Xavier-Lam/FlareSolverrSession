@@ -25,30 +25,25 @@ def main(argv=None):
         return 0
 
     first_args, remaining = main_parser.parse_known_args(argv)
-    command = first_args.command
 
+    # Determine command from remaining args.
+    if remaining and remaining[0] in ("session", "request"):
+        command = remaining.pop(0)
+    else:
+        command = "request"
+
+    rpc = RPC(first_args.flaresolverr_url)
     try:
         if command == "session":
             parser = _build_session_parser()
             args = parser.parse_args([command] + remaining)
-            rpc = RPC(first_args.flaresolverr_url)
             res = _handle_session(rpc, args)
-            format_output(res)
-            return 0
-
-        if command == "request":
-            request_argv = remaining
-        elif command is not None:
-            request_argv = [command] + remaining
         else:
-            main_parser.print_help()
-            return 0
+            parser = _build_request_parser()
+            args = parser.parse_args([command] + remaining)
+            res = _handle_request(rpc, args)
+            _truncate_response_body(res)
 
-        req_parser = _build_request_parser()
-        args = req_parser.parse_args(request_argv)
-        rpc = RPC(first_args.flaresolverr_url)
-        res = _handle_request(rpc, args)
-        _truncate_response_body(res)
         format_output(res)
         return 0
     except FlareSolverrResponseError as exc:
@@ -80,7 +75,6 @@ def _build_main_parser():
             "env var or http://localhost:8191/v1)"
         ),
     )
-    parser.add_argument("command", nargs="?", default=None)
     return parser
 
 
@@ -90,11 +84,11 @@ def _build_session_parser():
         description="Interact with a FlareSolverr instance",
     )
     subparsers = parser.add_subparsers(dest="command")
-    session_parser = subparsers.add_parser(
+    sub_parser = subparsers.add_parser(
         "session",
         help="Manage FlareSolverr sessions",
     )
-    session_sub = session_parser.add_subparsers(dest="session_action")
+    session_sub = sub_parser.add_subparsers(dest="session_action")
     session_sub.required = True
 
     # session create
@@ -131,57 +125,63 @@ def _build_request_parser():
         prog="flaresolverr-cli request",
         description="Send an HTTP request through FlareSolverr",
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command")
+    sub_parser = subparsers.add_parser(
+        "request",
+        help="Send an HTTP request through FlareSolverr",
+    )
+
+    sub_parser.add_argument(
         "url",
         help="URL to request",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-m",
         "--method",
         default=None,
         choices=["GET", "POST"],
         help="HTTP method (default: GET, or POST when -d is given)",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-s",
         "--session-id",
         dest="session_id",
         default=None,
         help="FlareSolverr session id to use",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-d",
         "--data",
         default=None,
         help="POST data (x-www-form-urlencoded)",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-o",
         "--output",
         dest="output_file",
         default=None,
         help="Write response body to file",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-t",
         "--timeout",
         type=int,
         default=None,
         help="Request timeout in milliseconds (default: 60000)",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "--proxy",
         default=None,
         help="Proxy URL (e.g. http://proxy:8080)",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "--session-ttl-minutes",
         dest="session_ttl_minutes",
         type=int,
         default=None,
         help="Auto-rotate sessions older than this many minutes",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "-c",
         "--cookies",
         dest="cookies",
@@ -189,26 +189,27 @@ def _build_request_parser():
         default=False,
         help="Return only cookies, omitting the response body",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "--screenshot",
         dest="screenshot",
         default=None,
         help="Write PNG screenshot of the final rendered page after all challenges and waits are completed to given path",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "--wait",
         dest="wait_in_seconds",
         type=int,
         default=None,
         help="Extra seconds to wait after the challenge is solved",
     )
-    parser.add_argument(
+    sub_parser.add_argument(
         "--disable-media",
         dest="disable_media",
         action="store_true",
         default=False,
         help="Disable loading images, CSS and fonts",
     )
+
     return parser
 
 
