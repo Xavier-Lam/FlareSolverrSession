@@ -165,24 +165,10 @@ class Session(requests.Session):
 
         # POST data
         if method == "POST":
-            data = kwargs.get("data")
-            if data is not None:
-                if isinstance(data, dict):
-                    data = urlencode(data)
-                elif not isinstance(data, str):
-                    # Python 2 unicode handling
-                    try:
-                        if isinstance(data, unicode):  # noqa: F821
-                            data = data.encode("utf-8")
-                    except NameError:
-                        pass
-                    data = str(data)
-                request_kwargs["data"] = data
+            request_kwargs["data"] = kwargs.get("data")
 
         # Optional cookies
-        cookies = kwargs.get("cookies")
-        if cookies:
-            request_kwargs["cookies"] = cookies
+        request_kwargs["cookies"] = kwargs.get("cookies")
 
         return request_kwargs
 
