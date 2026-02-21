@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import logging
+import time
 import unittest
 import warnings
 
@@ -337,7 +339,7 @@ class TestChallengeNotSolved(unittest.TestCase):
 
 
 class TestCookieExpiry(unittest.TestCase):
-    """Expired cookies trigger a new solve cycle."""
+    """Cookie expiry and caching behaviour."""
 
     def test_resolves_on_second_challenge(self):
         """When cached cookies expire, the adapter re-solves and succeeds."""
@@ -375,7 +377,7 @@ class TestCookieExpiry(unittest.TestCase):
 
         with mock.patch(
             "flaresolverr_session.adapter.is_cloudflare_challenge",
-            side_effect=[True, True],
+            side_effect=[True, False, True, False],
         ):
             req1 = requests.Request("GET", "https://example.com/page").prepare()
             result1 = adapter.send(req1)
@@ -416,6 +418,85 @@ class TestCookieExpiry(unittest.TestCase):
 
         second_req = mock_base.send.call_args_list[2][0][0]
         self.assertIn("cf_clearance=abc123", second_req.headers.get("Cookie", ""))
+
+    def test_expired_cookie_not_applied(self):
+        """A cookie whose expiry has passed is not injected into the request."""
+        past_time = int(time.time()) - 3600  # 1 hour ago
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(200, "OK"),
+            _make_response(200, "subsequent"),
+        ]
+        mock_rpc = _make_rpc()
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data(
+            cookies=[
+                {
+                    "name": "cf_clearance",
+                    "value": "expired_val",
+                    "domain": ".example.com",
+                    "path": "/",
+                    "expiry": past_time,
+                }
+            ]
+        )
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, False],
+        ):
+            req1 = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req1)
+
+        # Subsequent request should NOT carry the expired cookie.
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge", return_value=False
+        ):
+            req2 = requests.Request("GET", "https://example.com/page2").prepare()
+            adapter.send(req2)
+
+        third_req = mock_base.send.call_args_list[2][0][0]
+        self.assertNotIn("cf_clearance", third_req.headers.get("Cookie", ""))
+
+    def test_non_expired_cookie_applied(self):
+        """A cookie whose expiry is in the future is injected normally."""
+        future_time = int(time.time()) + 7200  # 2 hours from now
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(200, "OK"),
+            _make_response(200, "subsequent"),
+        ]
+        mock_rpc = _make_rpc()
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data(
+            cookies=[
+                {
+                    "name": "cf_clearance",
+                    "value": "fresh_val",
+                    "domain": ".example.com",
+                    "path": "/",
+                    "expiry": future_time,
+                }
+            ]
+        )
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, False],
+        ):
+            req1 = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req1)
+
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge", return_value=False
+        ):
+            req2 = requests.Request("GET", "https://example.com/page2").prepare()
+            adapter.send(req2)
+
+        third_req = mock_base.send.call_args_list[2][0][0]
+        self.assertIn("cf_clearance=fresh_val", third_req.headers.get("Cookie", ""))
 
 
 class TestChallengeURLResolution(unittest.TestCase):
@@ -622,6 +703,235 @@ class TestUserAgentPerSite(unittest.TestCase):
 
         last_req = mock_base.send.call_args[0][0]
         self.assertEqual(last_req.headers.get("User-Agent"), "SolvedUA/3.0")
+
+
+class TestCookieRootDomain(unittest.TestCase):
+    """Cookies are stored and retrieved by root domain, not exact hostname."""
+
+    def _setup_solve(self, request_url, cookie_value="root_val"):
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(200, "OK"),
+        ]
+        mock_rpc = _make_rpc()
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data(
+            cookies=[
+                {
+                    "name": "cf_clearance",
+                    "value": cookie_value,
+                    "domain": ".example.com",
+                    "path": "/secret",
+                    "secure": True,
+                }
+            ]
+        )
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, False],
+        ):
+            req = requests.Request("GET", request_url).prepare()
+            adapter.send(req)
+
+        return adapter, mock_base
+
+    def test_cookie_keyed_by_root_domain(self):
+        """Cookies solved for www.example.com are stored under example.com."""
+        adapter, _ = self._setup_solve("https://www.example.com/page")
+        self.assertIn("example.com", adapter._cf_cookies)
+        self.assertNotIn("www.example.com", adapter._cf_cookies)
+
+    def test_subdomain_request_gets_root_domain_cookie(self):
+        """A cookie solved for example.com is applied to www.example.com requests."""
+        # Solve for the root domain.
+        adapter, mock_base = self._setup_solve(
+            "https://example.com/", cookie_value="zone_cookie"
+        )
+
+        # Now request a subdomain — should carry the cookie.
+        mock_base.send.side_effect = None
+        mock_base.send.return_value = _make_response(200, "subdomain")
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge", return_value=False
+        ):
+            req = requests.Request("GET", "https://www.example.com/page").prepare()
+            adapter.send(req)
+
+        sent_req = mock_base.send.call_args[0][0]
+        self.assertIn("cf_clearance=zone_cookie", sent_req.headers.get("Cookie", ""))
+
+    def test_root_domain_request_gets_subdomain_solved_cookie(self):
+        """A cookie solved for www.example.com is also applied to example.com."""
+        adapter, mock_base = self._setup_solve(
+            "https://www.example.com/", cookie_value="www_cookie"
+        )
+
+        mock_base.send.side_effect = None
+        mock_base.send.return_value = _make_response(200, "root")
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge", return_value=False
+        ):
+            req = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req)
+
+        sent_req = mock_base.send.call_args[0][0]
+        self.assertIn("cf_clearance=www_cookie", sent_req.headers.get("Cookie", ""))
+
+    def test_cookie_path_ignored_on_prepare(self):
+        """The path from the original cookie is ignored; cookie applies to all paths."""
+        adapter, mock_base = self._setup_solve(
+            "https://example.com/secret", cookie_value="path_test"
+        )
+
+        mock_base.send.side_effect = None
+        mock_base.send.return_value = _make_response(200, "other")
+        # Request a totally different path.
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge", return_value=False
+        ):
+            req = requests.Request("GET", "https://example.com/other/path").prepare()
+            adapter.send(req)
+
+        sent_req = mock_base.send.call_args[0][0]
+        self.assertIn("cf_clearance=path_test", sent_req.headers.get("Cookie", ""))
+
+    def test_cookie_domain_attribute_ignored(self):
+        """FlareSolverr's domain attribute is ignored; root domain is used instead."""
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(200, "OK"),
+        ]
+        mock_rpc = _make_rpc()
+        # FlareSolverr may return the cookie with a full subdomain domain.
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data(
+            cookies=[
+                {
+                    "name": "cf_clearance",
+                    "value": "domain_ignored",
+                    "domain": ".www.example.com",  # should be ignored
+                    "path": "/",
+                }
+            ]
+        )
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, False],
+        ):
+            req = requests.Request("GET", "https://www.example.com/page").prepare()
+            adapter.send(req)
+
+        # Should be stored under root domain, not the FlareSolverr-provided domain.
+        self.assertIn("example.com", adapter._cf_cookies)
+        jar = adapter._cf_cookies["example.com"]
+        cookie_names = [c.name for c in jar]
+        self.assertIn("cf_clearance", cookie_names)
+
+
+class TestAdapterLogging(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super(TestAdapterLogging, cls).setUpClass()
+        logger = logging.getLogger("flaresolverr_session.adapter")
+        logger.setLevel(logging.DEBUG)
+        cls._log_handler = MockLoggingHandler(level=logging.DEBUG)
+        logger.addHandler(cls._log_handler)
+        cls._log_messages = cls._log_handler.messages
+
+    def setUp(self):
+        super(TestAdapterLogging, self).setUp()
+        self._log_handler.reset()
+
+    def _make_adapter_with_mocks(self):
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(200, "OK"),
+        ]
+        mock_rpc = _make_rpc()
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data()
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+        return adapter, mock_base, mock_rpc
+
+    def test_debug_log_on_request(self):
+        """A debug record is emitted when a request arrives."""
+        adapter, _, _ = self._make_adapter_with_mocks()
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            return_value=False,
+        ):
+            req = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req)
+        self.assertEqual(len(self._log_messages["debug"]), 1)
+        self.assertIn("https://example.com/page", self._log_messages["debug"][0])
+        self.assertIn("GET", self._log_messages["debug"][0])
+        self.assertIn("receive", self._log_messages["debug"][0].lower())
+
+    def test_info_log_on_challenge_detected(self):
+        """An info record is emitted when a Cloudflare challenge is detected."""
+        adapter, _, _ = self._make_adapter_with_mocks()
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, False],
+        ):
+            req = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req)
+        self.assertEqual(len(self._log_messages["debug"]), 3)
+        self.assertIn("detect", self._log_messages["debug"][1].lower())
+        self.assertIn("solve", self._log_messages["debug"][2].lower())
+
+    def test_warning_log_on_retry_still_challenged(self):
+        """A warning is emitted when the retry response is also a challenge."""
+        mock_base = mock.MagicMock(spec=HTTPAdapter)
+        mock_base.send.side_effect = [
+            _make_response(503, "challenge"),
+            _make_response(503, "still challenged"),
+        ]
+        mock_rpc = _make_rpc()
+        mock_rpc.request.get.return_value = _flaresolverr_solved_data()
+        adapter = Adapter(rpc=mock_rpc, base_adapter=mock_base)
+        with mock.patch(
+            "flaresolverr_session.adapter.is_cloudflare_challenge",
+            side_effect=[True, True],
+        ):
+            req = requests.Request("GET", "https://example.com/page").prepare()
+            adapter.send(req)
+
+        self.assertEqual(len(self._log_messages["debug"]), 2)
+        self.assertIn("detect", self._log_messages["debug"][1].lower())
+        self.assertEqual(len(self._log_messages["warning"]), 1)
+        self.assertIn("still", self._log_messages["warning"][0].lower())
+
+
+class MockLoggingHandler(logging.Handler):
+    def __init__(self, *args, **kwargs):
+        self.messages = {
+            "debug": [],
+            "info": [],
+            "warning": [],
+            "error": [],
+            "critical": [],
+        }
+        super(MockLoggingHandler, self).__init__(*args, **kwargs)
+
+    def emit(self, record):
+        "Store a message from ``record`` in the instance's ``messages`` dict."
+        try:
+            self.messages[record.levelname.lower()].append(record.getMessage())
+        except Exception:
+            self.handleError(record)
+
+    def reset(self):
+        self.acquire()
+        try:
+            for message_list in self.messages.values():
+                del message_list[:]
+        finally:
+            self.release()
 
 
 if __name__ == "__main__":

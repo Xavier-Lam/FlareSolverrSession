@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import logging
+import time
 import warnings
 
 try:
@@ -13,6 +15,9 @@ from requests.utils import select_proxy
 
 from flaresolverr_session.detection import is_cloudflare_challenge
 from flaresolverr_session.rpc import RPC
+
+
+logger = logging.getLogger(__name__)
 
 
 class Adapter(BaseAdapter):
@@ -82,20 +87,29 @@ class Adapter(BaseAdapter):
             proxies=proxies,
         )
 
+        self._log(logging.DEBUG, "Adapter received request", request)
         self._prepare_request(request)
         response = self._base_adapter.send(request, **kwargs)
 
         if is_cloudflare_challenge(response):
+            self._log(logging.DEBUG, "Challenge detected", request)
             self._solve_challenge(request.url, proxies=proxies)
             self._prepare_request(request)
             response = self._base_adapter.send(request, **kwargs)
+            if is_cloudflare_challenge(response):
+                self._log(
+                    logging.WARNING,
+                    "Challenge still present after solve attempt",
+                    request,
+                )
+            else:
+                self._log(logging.DEBUG, "Challenge has been solved", request)
 
         return response
 
     def _prepare_request(self, request):
         parsed = urlparse(request.url)
-        domain = parsed.hostname
-        path = parsed.path or "/"
+        domain = _get_root_domain(parsed.hostname)
 
         jar = self._cf_cookies.get(domain)
         if jar:
@@ -109,10 +123,10 @@ class Adapter(BaseAdapter):
                     if "=" in pair:
                         name, value = pair.split("=", 1)
                         existing.set(name.strip(), value.strip())
-            # Overlay cached CF cookies that match the request path.
             for cookie in jar:
-                if path.startswith(cookie.path):
-                    existing.set(cookie.name, cookie.value)
+                if cookie.expires is not None and cookie.expires < time.time():
+                    continue
+                existing.set(cookie.name, cookie.value)
 
             # Re-build Cookie header.
             cookie_str = "; ".join("%s=%s" % (c.name, c.value) for c in existing)
@@ -125,7 +139,7 @@ class Adapter(BaseAdapter):
 
     def _solve_challenge(self, original_url, proxies=None):
         challenge_url = self._get_challenge_url(original_url)
-        rpc_kwargs = {"url": challenge_url}
+        rpc_kwargs = {"url": challenge_url, "return_only_cookies": True}
 
         if proxies:
             proxy_url = select_proxy(challenge_url, proxies)
@@ -135,7 +149,8 @@ class Adapter(BaseAdapter):
         data = self._rpc.request.get(**rpc_kwargs)
         solution = data.get("solution", {})
 
-        domain = urlparse(original_url).hostname
+        # Cloudflare cookies are scoped per zone (root domain)
+        domain = _get_root_domain(urlparse(original_url).hostname)
 
         user_agent = solution.get("userAgent")
         if user_agent:
@@ -147,9 +162,6 @@ class Adapter(BaseAdapter):
                 jar.set(
                     cd["name"],
                     cd.get("value", ""),
-                    domain=cd.get("domain"),
-                    path=cd.get("path", "/"),
-                    secure=cd.get("secure", False),
                     expires=cd.get("expiry"),
                 )
                 break
@@ -166,3 +178,17 @@ class Adapter(BaseAdapter):
             )
 
         return self._challenge_url
+
+    def _log(self, level, message, request):
+        logger.log(
+            level,
+            "%s - [%s] %s",
+            message,
+            request.method,
+            request.url,
+        )
+
+
+def _get_root_domain(hostname):
+    parts = hostname.split(".")
+    return ".".join(parts[-2:])
