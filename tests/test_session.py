@@ -526,5 +526,27 @@ class TestExceptionHierarchy(unittest.TestCase):
         self.assertIs(exc.response_data, data)
 
 
+class TestSessionWithoutRPC(unittest.TestCase):
+    """Session constructed without an explicit RPC instance creates its own RPC."""
+
+    def test_session_created_without_rpc(self):
+        """Session() with a URL creates an internal RPC and uses it."""
+        with mock.patch("flaresolverr_session.session.RPC") as mock_rpc_cls:
+            mock_rpc_instance = _make_mock_rpc()
+            mock_rpc_cls.return_value = mock_rpc_instance
+
+            session = Session("http://localhost:8191/v1")
+            try:
+                session.get("https://example.com/")
+            finally:
+                session.close()
+
+        mock_rpc_cls.assert_called_once_with("http://localhost:8191/v1")
+        mock_rpc_instance.request.get.assert_called_once()
+        self.assertEqual(
+            mock_rpc_instance.request.get.call_args[1]["url"], "https://example.com/"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

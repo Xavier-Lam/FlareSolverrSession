@@ -34,8 +34,7 @@ class Session(requests.Session):
             When *None* a new session is automatically created.
         proxy (str, dict or None): A proxy specification.
             When a *str*, it is interpreted as a URL.
-            When a *dict*, it should contain ``"url"`` and optionally
-            ``"username"`` and ``"password"`` keys.
+            When a *dict*, it has a ``"url"`` key.
         timeout (int or None): ``maxTimeout`` in **milliseconds**
             passed to FlareSolverr.  Defaults to *60000* (60 s).
         rpc (RPC or None): An optional pre-configured

@@ -142,6 +142,7 @@ adapter = Adapter("http://localhost:8191/v1")
 
 session = requests.Session()
 session.mount("https://nowsecure.nl", adapter)
+session.mount("https://www.nowsecure.nl", adapter)  # mount subdomain, mount doesn't support wildcards
 
 response = session.get("https://protected-site.com/page")
 print(response.text)
@@ -149,7 +150,7 @@ print(response.text)
 
 It is recommended only mount the adapter to specific origins that require Cloudflare bypass. Read the [caveats section](#caveats) before using it.
 
-> Don't use the `Session` provided by `flaresolverr_session` here.
+> Don't use the `Session` provided by `flaresolverr_session` here, they are different concepts.
 
 #### Caveats
 
@@ -169,7 +170,7 @@ It is recommended only mount the adapter to specific origins that require Cloudf
 
 ### RPC Tool
 
-The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, ideal for low-level access to raw API responses.
+The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, ideal for low-level access to raw API responses. If the *Flaresolverr* responds a non-OK status, it raise a [`FlareSolverrResponseError`](#response-object). The RPC class is the underlying tool used by all the features the project provides.
 
 ```python
 from flaresolverr_session import RPC

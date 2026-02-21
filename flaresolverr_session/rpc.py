@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import print_function
 
 import json
 import os
@@ -11,14 +10,12 @@ except ImportError:
 
 import requests
 
-from flaresolverr_session.exceptions import FlareSolverrError, FlareSolverrResponseError
+from flaresolverr_session.exceptions import FlareSolverrResponseError
 
 __all__ = [
     "RPC",
     "SessionCommand",
     "RequestCommand",
-    "FlareSolverrError",
-    "FlareSolverrResponseError",
 ]
 
 
@@ -33,8 +30,8 @@ class RPC(object):
     Parameters:
         flaresolverr_url (str): The FlareSolverr API endpoint
             (e.g. ``"http://localhost:8191/v1"``).
-        api_session (requests.Session or None): An optional pre-configured
-            session to use for API calls.
+        api_session (requests.Session or None): Session object used to
+            communicate with the FlareSolverr instance.
     """
 
     def __init__(self, flaresolverr_url=None, api_session=None):

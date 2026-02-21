@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 
-import os
 import time
 import unittest
 
+try:
+    from unittest import mock
+except ImportError:
+    import mock  # Python 2 back-port
+
 import requests
 
-from flaresolverr_session import RPC
+from flaresolverr_session import RPC, FlareSolverrResponseError
 
 try:
     string_types = basestring  # Python 2
@@ -21,14 +25,6 @@ _PLAIN_POST_URL = "https://httpbin.org/post"
 class RPCTestCase(unittest.TestCase):
     def setUp(self):
         session = requests.Session()
-        proxy_url = os.environ.get("FLARESOLVERR_PROXY")
-        if proxy_url:
-            session.proxies.update(
-                {
-                    "http": proxy_url,
-                    "https": proxy_url,
-                }
-            )
         self.rpc = RPC(api_session=session)
 
     def _assert_ok(self, response):
@@ -285,6 +281,29 @@ class TestRequestPost(RPCTestCase):
         result = self.rpc.request.post(_PLAIN_POST_URL, data="x=1", disable_media=True)
         self._assert_ok(result)
         self._assert_solution(result["solution"])
+
+
+class TestRPCErrorHandling(unittest.TestCase):
+    def test_send_raises_on_error_status(self):
+        """RPC.send() raises FlareSolverrResponseError when status != 'ok'."""
+        error_data = {
+            "status": "error",
+            "message": "Internal error",
+            "startTimestamp": 0,
+            "endTimestamp": 0,
+            "version": "0.0.0",
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = error_data
+
+        rpc = RPC("http://localhost:8191/v1")
+        rpc._api_session = mock.MagicMock()
+        rpc._api_session.post.return_value = mock_resp
+
+        with self.assertRaises(FlareSolverrResponseError) as ctx:
+            rpc.send({"cmd": "request.get", "url": "https://example.com"})
+        self.assertEqual(ctx.exception.message, "Internal error")
+        self.assertEqual(ctx.exception.response_data, error_data)
 
 
 if __name__ == "__main__":
