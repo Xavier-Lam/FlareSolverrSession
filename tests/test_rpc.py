@@ -25,6 +25,7 @@ _PLAIN_POST_URL = "https://httpbin.org/post"
 class RPCTestCase(unittest.TestCase):
     def setUp(self):
         session = requests.Session()
+        session.trust_env = False
         self.rpc = RPC(api_session=session)
 
     def _assert_ok(self, response):

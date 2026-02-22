@@ -344,10 +344,30 @@ class TestRequestWithOptions(unittest.TestCase):
 
     def test_return_only_cookies(self):
         """Request with --cookies."""
-        code, out, _err, rpc = _run_cli(["https://example.com", "--cookies"])
+        code, out, _err, rpc = _run_cli(["https://example.com", "--cookies-only"])
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
             "https://example.com", return_only_cookies=True
+        )
+
+    def test_cookies_list(self):
+        """Request with multiple --cookies entries forwarded."""
+        code, out, _err, rpc = _run_cli(
+            [
+                "https://example.com",
+                "--cookies",
+                "a=cookie1",
+                "--cookies",
+                "b=cookie2",
+            ]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://example.com",
+            cookies=[
+                {"name": "a", "value": "cookie1"},
+                {"name": "b", "value": "cookie2"},
+            ],
         )
 
     def test_return_screenshot(self):
@@ -383,7 +403,7 @@ class TestRequestWithOptions(unittest.TestCase):
                 "https://example.com",
                 "--session-ttl-minutes",
                 "15",
-                "--cookies",
+                "--cookies-only",
                 "--screenshot",
                 "ss.png",
                 "--wait",

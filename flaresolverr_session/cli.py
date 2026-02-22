@@ -181,13 +181,21 @@ def _build_request_parser():
         default=None,
         help="Auto-rotate sessions older than this many minutes",
     )
+    # Return only cookies flag (previously -c/--cookies)
     sub_parser.add_argument(
         "-c",
-        "--cookies",
-        dest="cookies",
+        "--cookies-only",
+        dest="cookies_only",
         action="store_true",
         default=False,
         help="Return only cookies, omitting the response body",
+    )
+    sub_parser.add_argument(
+        "--cookies",
+        dest="cookies",
+        action="append",
+        default=None,
+        help="Provide cookie as name=value. Can be repeated.",
     )
     sub_parser.add_argument(
         "--screenshot",
@@ -256,8 +264,21 @@ def _handle_request(rpc, args):
     session_ttl_minutes = getattr(args, "session_ttl_minutes", None)
     if session_ttl_minutes is not None:
         kwargs["session_ttl_minutes"] = session_ttl_minutes
-    if getattr(args, "cookies", False):
+    # Return-only flag
+    if getattr(args, "cookies_only", False):
         kwargs["return_only_cookies"] = True
+    # Explicit cookies passed to forward to FlareSolverr
+    cookies = getattr(args, "cookies", None)
+    if cookies:
+        parsed = []
+        for c in cookies:
+            parts = c.split("=", 1)
+            if len(parts) == 2:
+                name, value = parts[0], parts[1]
+            else:
+                raise ValueError("Invalid cookie format: %s (expected name=value)" % c)
+            parsed.append({"name": name, "value": value})
+        kwargs["cookies"] = parsed
     screenshot_path = getattr(args, "screenshot", None)
     if screenshot_path:
         kwargs["return_screenshot"] = True

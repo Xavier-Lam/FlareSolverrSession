@@ -4,11 +4,9 @@
 [![CI](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml/badge.svg)](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession/branch/master/graph/badge.svg)](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession)
 
-A [`requests.Session`](https://docs.python-requests.org/) that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API.
+A drop-in [`requests.Session`](https://docs.python-requests.org/) implementation that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API.
 
-The package also provides a more powerful [Adapter](#adapter) to handle complex requests if the `Session` is not sufficient.
-
-The project ships with a command-line interface (CLI) for requests and session management, and an RPC client for direct access to the FlareSolverr JSON API.
+The project also ships with an [Adapter](#adapter) which is able to handle complex requests if the [Session](#basic-usage) is insufficient in your use case, a [command-line interface (CLI)](#command-line-interface) for requests and session management, and an [RPC client](#rpc-tool) for direct access to the *FlareSolverr* JSON API.
 
 This project is not responsible for solving challenges itself, it only forwards requests to *FlareSolverr*. If *FlareSolverr* fails to solve a challenge, it will raise an exception. Any issues related to challenge solving should be reported to the *FlareSolverr* project.
 
@@ -35,7 +33,7 @@ docker run -d --name=flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr
 
 ## Usage
 
-### Basic Usage
+### Basic usage
 
 ```python
 from flaresolverr_session import Session
@@ -55,7 +53,7 @@ session = Session(
 )
 ```
 
-#### Response Object
+#### Response object
 A `FlareSolverr` metadata object is attached to the `response` as `response.flaresolverr`. It contains details about the request and the challenge solving process returned by *FlareSolverr*.
 
 | Attribute | Description |
@@ -66,7 +64,7 @@ A `FlareSolverr` metadata object is attached to the `response` as `response.flar
 | `flaresolverr.start` / `flaresolverr.end` | Request timestamps (ms) |
 | `flaresolverr.version` | FlareSolverr server version |
 
-#### Exception Handling
+#### Exception handling
 If `FlareSolverr` returns an error response, the session will raise a `FlareSolverrResponseError` exception.
 
 All exceptions defined in the module are based on `FlareSolverrError`, which inherits from `requests.RequestException`. The hierarchy is as follows:
@@ -144,7 +142,7 @@ session = requests.Session()
 session.mount("https://nowsecure.nl", adapter)
 session.mount("https://www.nowsecure.nl", adapter)  # mount subdomain, mount doesn't support wildcards
 
-response = session.get("https://protected-site.com/page")
+response = session.get("https://nowsecure.com/page")
 print(response.text)
 ```
 
@@ -154,13 +152,34 @@ It is recommended only mount the adapter to specific origins that require Cloudf
 
 #### Caveats
 
-* The *FlareSolverr* instance and the machine running the adapter **must share the same public IP** (or use the same proxy with a consistent public IP). Otherwise the cookies obtained from *FlareSolverr* will not be accepted by Cloudflare.
-* The proxy used for the original request is automatically applied to the *FlareSolverr* request for the reason mentioned above.
+* The *FlareSolverr* instance and the machine running the adapter **must share the same public IP** (or use the same proxy with a consistent public IP). Otherwise the adapter won't work, because cookies obtained from *FlareSolverr* will not be accepted by Cloudflare.
 * The adapter automatically sends a `GET` request to the original URL to solve the challenge. You can provide a custom `challenge_url` to override this behavior.
-* Cloudflare cookies are tied to the `User-Agent` used during challenge solving. The adapter automatically sets the `User-Agent` returned by FlareSolverr.
+* Cloudflare cookies are tied to the `User-Agent` used during challenge solving. The adapter automatically sets or overrides the `User-Agent` returned by FlareSolverr.
 * The adapter is less reliable than using the [Session](#basic-usage) directly.
 
-#### How It Works
+#### Using with a proxy
+The correct way to use the adapter with a proxy is either set it in environment variable or set manually in the `requests.Session` that uses the adapter.
+
+```python
+import requests
+from flaresolverr_session import Adapter
+
+adapter = Adapter("http://localhost:8191/v1")
+
+session = requests.Session()
+session.trust_env = False
+session.proxies = {
+    "http": "http://proxy:8080",
+    "https": "http://proxy:8080",
+}
+session.mount("https://nowsecure.nl", adapter)
+```
+
+The proxy used for the original request is automatically applied to the *FlareSolverr* request for the reason mentioned in [caveats](#caveats). Please ensure the proxy you are using is accessible by the *FlareSolverr* service.
+
+> Set `trust_env` to `False` to ensure you are using the proxy set in your code. Proxy settings in environment variables will override the proxies you set in code, there are [multiple issues](https://github.com/psf/requests/issues/2018) in *requests* project related to this problem.
+
+#### How it works
 
 1. The adapter first attempts to send the request normally through its base adapter.
 2. If it detects a Cloudflare challenge, the adapter forwards the URL to a FlareSolverr instance.
