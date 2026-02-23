@@ -139,7 +139,11 @@ class Adapter(BaseAdapter):
 
     def _solve_challenge(self, original_url, proxies=None):
         challenge_url = self._get_challenge_url(original_url)
-        rpc_kwargs = {"url": challenge_url, "return_only_cookies": True}
+        rpc_kwargs = {
+            "url": challenge_url,
+            "return_only_cookies": True,
+            "disable_media": True,
+        }
 
         if proxies:
             proxy_url = select_proxy(challenge_url, proxies)
