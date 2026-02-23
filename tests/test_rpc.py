@@ -10,7 +10,11 @@ except ImportError:
 
 import requests
 
-from flaresolverr_session import RPC, FlareSolverrResponseError
+from flaresolverr_session import (
+    RPC,
+    FlareSolverrChallengeError,
+    FlareSolverrResponseError,
+)
 
 try:
     string_types = basestring  # Python 2
@@ -305,6 +309,28 @@ class TestRPCErrorHandling(unittest.TestCase):
             rpc.send({"cmd": "request.get", "url": "https://example.com"})
         self.assertEqual(ctx.exception.message, "Internal error")
         self.assertEqual(ctx.exception.response_data, error_data)
+
+    def test_send_raises_challenge_error(self):
+        """RPC.get() raises FlareSolverrChallengeError on challenge-related errors."""
+        error_data = {
+            "status": "error",
+            "message": "Captcha challenge failed",
+            "startTimestamp": 0,
+            "endTimestamp": 0,
+            "version": "0.0.0",
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = error_data
+
+        rpc = RPC("http://localhost:8191/v1")
+        rpc._api_session = mock.MagicMock()
+        rpc._api_session.post.return_value = mock_resp
+
+        with self.assertRaises(FlareSolverrChallengeError) as ctx:
+            rpc.request.get("https://example.com")
+        self.assertEqual(ctx.exception.message, "Captcha challenge failed")
+        self.assertEqual(ctx.exception.response_data, error_data)
+        self.assertIs(ctx.exception.response, mock_resp)
 
 
 if __name__ == "__main__":

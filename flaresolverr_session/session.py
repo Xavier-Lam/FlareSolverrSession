@@ -11,11 +11,7 @@ import requests
 from requests.structures import CaseInsensitiveDict
 
 from flaresolverr_session.rpc import RPC
-from flaresolverr_session.exceptions import (
-    FlareSolverrResponseError,
-    FlareSolverrChallengeError,
-    FlareSolverrUnsupportedMethodError,
-)
+from flaresolverr_session.exceptions import FlareSolverrUnsupportedMethodError
 
 
 class Session(requests.Session):
@@ -123,18 +119,8 @@ class Session(requests.Session):
             )
 
         request_kwargs = self._build_request_kwargs(method, url, **kwargs)
-        try:
-            if method == "GET":
-                resp_data = self._rpc.request.get(**request_kwargs)
-            else:
-                resp_data = self._rpc.request.post(**request_kwargs)
-        except FlareSolverrResponseError as e:
-            msg = e.message.lower()
-            if "captcha" in msg or "timeout" in msg or "challenge" in msg:
-                raise FlareSolverrChallengeError(
-                    e.message, response_data=e.response_data
-                )
-            raise
+        send = getattr(self._rpc.request, method.lower())
+        resp_data = send(**request_kwargs)
         return Response(resp_data)
 
     def close(self):

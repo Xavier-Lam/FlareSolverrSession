@@ -188,30 +188,6 @@ class TestUnsolvedChallenge(unittest.TestCase):
         rpc.request.get.side_effect = FlareSolverrResponseError(message, fake_data)
         return rpc, fake_data
 
-    def test_challenge_not_solved(self):
-        """FlareSolverrChallengeError raised on failed challenge."""
-        rpc, fake_data = self._make_error_rpc("Challenge not solved")
-        with _make_session(rpc=rpc) as session:
-            with self.assertRaises(FlareSolverrChallengeError) as ctx:
-                session.get("https://example.com")
-        self.assertEqual(ctx.exception.response_data, fake_data)
-        self.assertIsInstance(ctx.exception, FlareSolverrResponseError)
-        self.assertEqual(ctx.exception.message, "Challenge not solved")
-
-    def test_challenge_failed(self):
-        """FlareSolverrChallengeError raised when captcha is detected."""
-        messages = (
-            "Captcha detected but no automatic solver is configured.",
-            "Error: Timeout reached",
-        )
-        for msg in messages:
-            rpc, fake_data = self._make_error_rpc(msg)
-            with _make_session(rpc=rpc) as session:
-                with self.assertRaises(FlareSolverrChallengeError) as ctx:
-                    session.get("https://example.com")
-            self.assertEqual(ctx.exception.response_data, fake_data)
-            self.assertEqual(ctx.exception.message, msg)
-
     def test_non_challenge_error_not_wrapped(self):
         """A non-challenge FlareSolverrResponseError is re-raised as-is."""
         rpc = _make_mock_rpc()

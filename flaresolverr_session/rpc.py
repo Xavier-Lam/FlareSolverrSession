@@ -10,7 +10,10 @@ except ImportError:
 
 import requests
 
-from flaresolverr_session.exceptions import FlareSolverrResponseError
+from flaresolverr_session.exceptions import (
+    FlareSolverrChallengeError,
+    FlareSolverrResponseError,
+)
 
 __all__ = [
     "RPC",
@@ -401,4 +404,12 @@ class RequestCommand(object):
         elif cmd == "request.post":
             # FlareSolverr requires postData for request.post; send empty string
             payload["postData"] = ""
-        return self._rpc.send(payload)
+        try:
+            return self._rpc.send(payload)
+        except FlareSolverrResponseError as e:
+            msg = e.message.lower()
+            if "captcha" in msg or "timeout" in msg or "challenge" in msg:
+                raise FlareSolverrChallengeError(
+                    e.message, e.response_data, response=e.response
+                )
+            raise

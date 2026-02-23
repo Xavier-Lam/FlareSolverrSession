@@ -4,7 +4,7 @@
 [![CI](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml/badge.svg)](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession/branch/master/graph/badge.svg)](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession)
 
-A drop-in [`requests.Session`](https://docs.python-requests.org/) implementation that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API.
+A drop-in [`requests.Session`](https://docs.python-requests.org/) implementation that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API. The project is compatible with Python 2.7.
 
 The project also ships with an [Adapter](#adapter) which is able to handle complex requests if the [Session](#basic-usage) is insufficient in your use case, a [command-line interface (CLI)](#command-line-interface) for requests and session management, and an [RPC client](#rpc-tool) for direct access to the *FlareSolverr* JSON API.
 
@@ -80,7 +80,7 @@ Exception Details:
 | Exception | Description |
 |---|---|
 | `FlareSolverrResponseError` | FlareSolverr returned an error response. The response dict is available as `response_data` attribute. |
-| `FlareSolverrChallengeError` | Challenge solving failed, raised only in `Session`. |
+| `FlareSolverrChallengeError` | Challenge solving failed. |
 | `FlareSolverrUnsupportedMethodError` | Unsupported HTTP method or content type. |
 
 #### Limitations
@@ -184,12 +184,12 @@ The proxy used for the original request is automatically applied to the *FlareSo
 1. The adapter first attempts to send the request normally through its base adapter.
 2. If it detects a Cloudflare challenge, the adapter forwards the URL to a FlareSolverr instance.
 3. FlareSolverr solves the challenge and returns cookies and a `User-Agent`.
-4. The adapter retries the original request using the returned credentials.
+4. The adapter caches the returned credentials and retries the original request with them.
 
 
 ### RPC Tool
 
-The `flaresolverr_rpc` module provides a programmatic interface to the FlareSolverr JSON API, ideal for low-level access to raw API responses. If the *Flaresolverr* responds a non-OK status, it raise a [`FlareSolverrResponseError`](#response-object). The RPC class is the underlying tool used by all the features the project provides.
+The `flaresolverr_rpc` module provides a programmatic interface to the *FlareSolverr* JSON API, ideal for low-level access to raw API responses. If the *Flaresolverr* responds a non-OK status, it raise a [`FlareSolverrResponseError`](#response-object). The RPC class is the underlying tool used by all the features the project provides.
 
 ```python
 from flaresolverr_session import RPC
