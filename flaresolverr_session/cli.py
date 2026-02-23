@@ -8,9 +8,13 @@ import base64
 import json
 import os
 import sys
+import time
 
 from flaresolverr_session.rpc import RPC
-from flaresolverr_session.exceptions import FlareSolverrResponseError
+from flaresolverr_session.exceptions import (
+    FlareSolverrChallengeError,
+    FlareSolverrResponseError,
+)
 
 
 def main(argv=None):
@@ -217,6 +221,17 @@ def _build_request_parser():
         default=False,
         help="Disable loading images, CSS and fonts",
     )
+    sub_parser.add_argument(
+        "--retries",
+        dest="retries",
+        type=int,
+        default=0,
+        help=(
+            "Number of times to retry on a FlareSolverr challenge timeout "
+            "(default: 0, disabled). The FlareSolverr timeout (-t/--timeout) "
+            "is applied per attempt, not across all attempts combined."
+        ),
+    )
 
     return parser
 
@@ -288,10 +303,20 @@ def _handle_request(rpc, args):
     if getattr(args, "disable_media", False):
         kwargs["disable_media"] = True
 
-    if method == "POST":
-        result = rpc.request.post(args.url, data=data, **kwargs)
-    else:
-        result = rpc.request.get(args.url, **kwargs)
+    retries = getattr(args, "retries", 0)
+    attempts = 0
+    while True:
+        try:
+            if method == "POST":
+                result = rpc.request.post(args.url, data=data, **kwargs)
+            else:
+                result = rpc.request.get(args.url, **kwargs)
+            break
+        except FlareSolverrChallengeError:
+            if attempts >= retries:
+                raise
+            attempts += 1
+            time.sleep(1)
 
     # Write body to file if requested
     output_file = getattr(args, "output_file", None)

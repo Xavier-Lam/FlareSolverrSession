@@ -502,6 +502,105 @@ class TestExceptionHierarchy(unittest.TestCase):
         self.assertIs(exc.response_data, data)
 
 
+class TestSessionRetry(unittest.TestCase):
+    """Tests for the max_retries mechanism on Session."""
+
+    def _make_challenge_error(self):
+        return FlareSolverrChallengeError(
+            "Challenge timeout",
+            response_data={"status": "error", "message": "Challenge timeout"},
+        )
+
+    def test_retry_disabled_by_default(self):
+        """max_retries defaults to 0: FlareSolverrChallengeError propagates."""
+        rpc = _make_mock_rpc()
+        rpc.request.get.side_effect = self._make_challenge_error()
+        with _make_session(rpc=rpc) as session:
+            with self.assertRaises(FlareSolverrChallengeError):
+                session.get("https://example.com/")
+
+        self.assertEqual(rpc.request.get.call_count, 1)
+
+    def test_retry_on_challenge_error(self):
+        """With max_retries=2, session retries twice on FlareSolverrChallengeError."""
+        error = self._make_challenge_error()
+        rpc = _make_mock_rpc(get_response=_ok_response())
+        rpc.request.get.side_effect = [error, error, _ok_response()]
+        with mock.patch("flaresolverr_session.session.time") as mock_time:
+            with _make_session(rpc=rpc, max_retries=2) as session:
+                resp = session.get("https://example.com/")
+
+        self.assertEqual(rpc.request.get.call_count, 3)
+        self.assertEqual(mock_time.sleep.call_count, 2)
+        mock_time.sleep.assert_called_with(1)
+
+    def test_retry_exhausted_raises(self):
+        """Error is re-raised once all max_retries are used."""
+        error = self._make_challenge_error()
+        rpc = _make_mock_rpc()
+        rpc.request.get.side_effect = error
+        with mock.patch("flaresolverr_session.session.time"):
+            with _make_session(rpc=rpc, max_retries=1) as session:
+                with self.assertRaises(FlareSolverrChallengeError):
+                    session.get("https://example.com/")
+
+        self.assertEqual(rpc.request.get.call_count, 2)
+
+    def test_retry_sleeps_one_second(self):
+        """There is a 1-second sleep between retry attempts."""
+        error = self._make_challenge_error()
+        rpc = _make_mock_rpc(get_response=_ok_response())
+        rpc.request.get.side_effect = [error, _ok_response()]
+        with mock.patch("flaresolverr_session.session.time") as mock_time:
+            with _make_session(rpc=rpc, max_retries=1) as session:
+                session.get("https://example.com/")
+
+        mock_time.sleep.assert_called_once_with(1)
+
+    def test_retry_post_on_challenge_error(self):
+        """POST requests are also retried on FlareSolverrChallengeError."""
+        error = self._make_challenge_error()
+        rpc = _make_mock_rpc(post_response=_ok_response())
+        rpc.request.post.side_effect = [error, _ok_response()]
+        with mock.patch("flaresolverr_session.session.time") as mock_time:
+            with _make_session(rpc=rpc, max_retries=1) as session:
+                resp = session.post("https://example.com/", data="a=1")
+
+        self.assertEqual(rpc.request.post.call_count, 2)
+        mock_time.sleep.assert_called_once_with(1)
+        self.assertIsInstance(resp, Response)
+
+    def test_non_challenge_error_not_retried(self):
+        """Non-challenge FlareSolverrResponseError is NOT retried."""
+        error = FlareSolverrResponseError(
+            "Server error",
+            response_data={"status": "error", "message": "Server error"},
+        )
+        rpc = _make_mock_rpc()
+        rpc.request.get.side_effect = error
+        with mock.patch("flaresolverr_session.session.time"):
+            with _make_session(rpc=rpc, max_retries=3) as session:
+                with self.assertRaises(FlareSolverrResponseError) as ctx:
+                    session.get("https://example.com/")
+
+        self.assertEqual(rpc.request.get.call_count, 1)
+        self.assertNotIsInstance(ctx.exception, FlareSolverrChallengeError)
+
+    def test_max_retries_stored(self):
+        """max_retries is stored on the session."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc, max_retries=4)
+        self.assertEqual(session._max_retries, 4)
+        session.close()
+
+    def test_default_max_retries_is_zero(self):
+        """Default max_retries is 0."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        self.assertEqual(session._max_retries, 0)
+        session.close()
+
+
 class TestSessionWithoutRPC(unittest.TestCase):
     """Session constructed without an explicit RPC instance creates its own RPC."""
 

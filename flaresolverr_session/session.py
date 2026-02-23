@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import time
 import warnings
 
 try:
@@ -11,7 +12,10 @@ import requests
 from requests.structures import CaseInsensitiveDict
 
 from flaresolverr_session.rpc import RPC
-from flaresolverr_session.exceptions import FlareSolverrUnsupportedMethodError
+from flaresolverr_session.exceptions import (
+    FlareSolverrChallengeError,
+    FlareSolverrUnsupportedMethodError,
+)
 
 
 class Session(requests.Session):
@@ -36,6 +40,9 @@ class Session(requests.Session):
         rpc (RPC or None): An optional pre-configured
             :class:`~flaresolverr_session.rpc.RPC` instance.  When provided,
             *flaresolverr_url* is ignored.
+        max_retries (int): Number of times to retry the request when a
+            :class:`~flaresolverr_session.exceptions.FlareSolverrChallengeError`
+            is raised (e.g. FlareSolverr challenge timeout).
 
     .. note::
 
@@ -50,7 +57,13 @@ class Session(requests.Session):
     _SUPPORTED_METHODS = ("GET", "POST")
 
     def __init__(
-        self, flaresolverr_url=None, session_id=None, proxy=None, timeout=None, rpc=None
+        self,
+        flaresolverr_url=None,
+        session_id=None,
+        proxy=None,
+        timeout=None,
+        rpc=None,
+        max_retries=0,
     ):
         super(Session, self).__init__()
 
@@ -72,6 +85,7 @@ class Session(requests.Session):
         self._proxy = proxy
         self._session_id = session_id
         self._session_created = False
+        self._max_retries = max_retries
 
     @property
     def session_id(self):
@@ -120,8 +134,16 @@ class Session(requests.Session):
 
         request_kwargs = self._build_request_kwargs(method, url, **kwargs)
         send = getattr(self._rpc.request, method.lower())
-        resp_data = send(**request_kwargs)
-        return Response(resp_data)
+        attempts = 0
+        while True:
+            try:
+                resp_data = send(**request_kwargs)
+                return Response(resp_data)
+            except FlareSolverrChallengeError:
+                if attempts >= self._max_retries:
+                    raise
+                attempts += 1
+                time.sleep(1)
 
     def close(self):
         """Destroy the FlareSolverr session and close the inherited

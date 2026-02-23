@@ -23,6 +23,7 @@ else:
 
 from flaresolverr_session.cli import main, _truncate_response_body
 from flaresolverr_session import (
+    FlareSolverrChallengeError,
     FlareSolverrResponseError,
     FlareSolverrError,
 )
@@ -786,6 +787,108 @@ class TestCliErrorHandling(unittest.TestCase):
         rpc = self._make_rpc_raising(exc)
         code, out, err, _ = _run_cli(["https://example.com"], rpc=rpc)
         self.assertEqual(out.strip(), "")
+
+
+class TestCliRetry(unittest.TestCase):
+    """Tests for --retries flag in the CLI."""
+
+    def _make_challenge_error(self):
+        return FlareSolverrChallengeError(
+            "Challenge timeout",
+            response_data={"status": "error", "message": "Challenge timeout"},
+        )
+
+    def test_retry_disabled_by_default(self):
+        """With no --retries, a FlareSolverrChallengeError causes exit code 1."""
+        rpc = _fake_rpc()
+        challenge_error = self._make_challenge_error()
+        rpc.request.get.side_effect = challenge_error
+
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            code = main(["https://example.com/"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(rpc.request.get.call_count, 1)
+
+    def test_retry_flag_retries_on_challenge_error(self):
+        """--retries 2 causes two retry attempts on FlareSolverrChallengeError."""
+        rpc = _fake_rpc()
+        challenge_error = self._make_challenge_error()
+        success = {
+            "status": "ok",
+            "message": "Challenge solved!",
+            "solution": {
+                "url": "https://example.com/",
+                "status": 200,
+                "headers": {},
+                "response": "<html>OK</html>",
+                "cookies": [],
+                "userAgent": "TestAgent",
+            },
+            "version": "3.3.21",
+            "startTimestamp": 100,
+            "endTimestamp": 200,
+        }
+        rpc.request.get.side_effect = [challenge_error, challenge_error, success]
+
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            with mock.patch("flaresolverr_session.cli.time") as mock_time:
+                code = main(["https://example.com/", "--retries", "2"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(rpc.request.get.call_count, 3)
+        self.assertEqual(mock_time.sleep.call_count, 2)
+        mock_time.sleep.assert_called_with(1)
+
+    def test_retry_exhausted_exits_one(self):
+        """When all retries are exhausted, exit code is 1."""
+        rpc = _fake_rpc()
+        challenge_error = self._make_challenge_error()
+        rpc.request.get.side_effect = challenge_error
+
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            with mock.patch("flaresolverr_session.cli.time"):
+                code = main(["https://example.com/", "--retries", "1"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(rpc.request.get.call_count, 2)
+
+    def test_retry_post_on_challenge_error(self):
+        """POST requests are also retried when --retries is set."""
+        rpc = _fake_rpc()
+        challenge_error = self._make_challenge_error()
+        rpc.request.post.side_effect = [challenge_error, rpc.request.post.return_value]
+
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            with mock.patch("flaresolverr_session.cli.time") as mock_time:
+                code = main(["-d", "a=1", "https://example.com/", "--retries", "1"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(rpc.request.post.call_count, 2)
+        mock_time.sleep.assert_called_once_with(1)
+
+    def test_non_challenge_error_not_retried(self):
+        """A non-challenge FlareSolverrResponseError exits immediately without retry."""
+        rpc = _fake_rpc()
+        non_challenge_error = FlareSolverrResponseError(
+            "Server error",
+            response_data={"status": "error", "message": "Server error"},
+        )
+        rpc.request.get.side_effect = non_challenge_error
+
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            with mock.patch("flaresolverr_session.cli.time"):
+                code = main(["https://example.com/", "--retries", "3"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(rpc.request.get.call_count, 1)
+
+    def test_retries_argument_default_zero(self):
+        """--retries defaults to 0 (the flag is not required)."""
+        rpc = _fake_rpc()
+        with mock.patch("flaresolverr_session.cli.RPC", return_value=rpc):
+            code = main(["https://example.com/"])
+        self.assertEqual(code, 0)
 
 
 class TestCliArgumentsBeforeUrl(unittest.TestCase):
