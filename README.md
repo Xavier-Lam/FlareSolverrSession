@@ -86,9 +86,10 @@ Exception Details:
 #### Limitations
 
 - **Only GET and  `application/x-www-form-urlencoded` POST** are supported. Otherwise, it will raise `FlareSolverrUnsupportedMethodError`. 
-- **Headers returned by FlareSolverr may be empty** for some sites, depending on the FlareSolverr version and configuration. An empty HTTP status will be treated as `200`. See [FlareSolverr#1162](https://github.com/FlareSolverr/FlareSolverr/issues/1162).
+- **Headers returned by FlareSolverr may be empty** for some sites, depending on the *FlareSolverr* version and configuration. An empty HTTP status will be treated as `200`. See [FlareSolverr#1162](https://github.com/FlareSolverr/FlareSolverr/issues/1162).
+- **Concurrent requests on the same `Session` are serialized.** A *FlareSolverr* session is a single active browser instance, simultaneously requests would produce unpredictable results, `Session` therefore holds a `threading.Lock` and enforces that only one request executes at a time. A session should also be used exclusively by a single program: sharing it across multiple processes or external clients may lead to unexpected behavior.
 
-> If you need more control over the requests or want to use unsupported methods/content types, consider using the [Adapter](#adapter) instead.
+> Consider using the [Adapter](#adapter) instead if you need more control over the requests, want to use unsupported methods/content types, or need a higher throughput.
 
 ### Command-Line Interface
 

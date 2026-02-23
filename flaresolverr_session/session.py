@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import threading
 import time
 import warnings
 
@@ -86,6 +87,7 @@ class Session(requests.Session):
         self._session_id = session_id
         self._session_created = False
         self._max_retries = max_retries
+        self._lock = threading.Lock()
 
     @property
     def session_id(self):
@@ -137,8 +139,9 @@ class Session(requests.Session):
         attempts = 0
         while True:
             try:
-                resp_data = send(**request_kwargs)
-                return Response(resp_data)
+                with self._lock:
+                    resp_data = send(**request_kwargs)
+                    return Response(resp_data)
             except FlareSolverrChallengeError:
                 if attempts >= self._max_retries:
                     raise

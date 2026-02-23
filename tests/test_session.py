@@ -623,5 +623,70 @@ class TestSessionWithoutRPC(unittest.TestCase):
         )
 
 
+class TestThreadSafety(unittest.TestCase):
+    """Session must serialize concurrent requests with a threading lock."""
+
+    def test_concurrent_requests_are_serialized(self):
+        """Two concurrent GET requests on the same session never interleave."""
+        import threading
+
+        order = []
+        first_started = threading.Event()
+        first_can_finish = threading.Event()
+        call_count = [0]
+        call_count_lock = threading.Lock()
+
+        def controlled_get(**kwargs):
+            with call_count_lock:
+                call_count[0] += 1
+                n = call_count[0]
+            order.append(("start", n))
+            if n == 1:
+                first_started.set()
+                first_can_finish.wait(timeout=5)
+            order.append(("end", n))
+            return _ok_response()
+
+        rpc = _make_mock_rpc()
+        rpc.request.get.side_effect = controlled_get
+
+        errors = []
+
+        session = _make_session(rpc=rpc)
+        try:
+
+            def worker():
+                try:
+                    session.get("https://example.com/")
+                except Exception as e:
+                    errors.append(e)
+
+            t1 = threading.Thread(target=worker)
+            t2 = threading.Thread(target=worker)
+
+            t1.start()
+            first_started.wait(timeout=5)  # t1 is now inside the RPC call
+
+            t2.start()
+            # Give t2 time to reach the lock and block on it
+            import time as _time
+
+            _time.sleep(0.1)
+
+            # t2 must not have started the RPC call yet (still blocked on lock)
+            started_count = len([x for x in order if x[0] == "start"])
+            self.assertEqual(started_count, 1)
+
+            first_can_finish.set()  # allow t1 to finish
+            t1.join(timeout=5)
+            t2.join(timeout=5)
+        finally:
+            session.close()
+
+        self.assertEqual(errors, [])
+        # Serialized order: t1 start, t1 end, t2 start, t2 end
+        self.assertEqual(order, [("start", 1), ("end", 1), ("start", 2), ("end", 2)])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ methods are invoked with the expected arguments.
 
 import base64
 import json
+import os
 import sys
 import unittest
 
@@ -283,6 +284,10 @@ class TestRequestDefault(unittest.TestCase):
 class TestRequestWithOptions(unittest.TestCase):
     """Tests for request command with various options."""
 
+    def tearDown(self):
+        os.path.exists("ss.png") and os.remove("ss.png")
+        return super(TestRequestWithOptions, self).tearDown()
+
     def test_session_id(self):
         """Request with -s session-id."""
         code, out, _err, rpc = _run_cli(["https://example.com", "-s", "my-session"])
@@ -374,7 +379,7 @@ class TestRequestWithOptions(unittest.TestCase):
     def test_return_screenshot(self):
         """Request with --return-screenshot."""
         code, out, _err, rpc = _run_cli(
-            ["https://example.com", "--screenshot", "s.png"]
+            ["https://example.com", "--screenshot", "ss.png"]
         )
         self.assertEqual(code, 0)
         rpc.request.get.assert_called_once_with(
