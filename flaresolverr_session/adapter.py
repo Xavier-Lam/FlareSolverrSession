@@ -44,7 +44,8 @@ class Adapter(BaseAdapter):
             (e.g. ``"/"``) — it will be combined with the domain of
             the blocked URL.
         base_adapter (requests.adapters.BaseAdapter or None): The
-            adapter used to perform actual HTTP requests.
+            adapter used to perform normal HTTP requests, communications with
+            FlareSolverr will not use it.
     """
 
     def __init__(

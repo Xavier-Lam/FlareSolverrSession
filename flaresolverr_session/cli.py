@@ -126,7 +126,7 @@ def _build_session_parser():
 
 def _build_request_parser():
     parser = argparse.ArgumentParser(
-        prog="flaresolverr-cli request",
+        prog="flaresolverr-cli",
         description="Send an HTTP request through FlareSolverr",
     )
     subparsers = parser.add_subparsers(dest="command")
