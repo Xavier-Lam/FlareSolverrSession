@@ -44,6 +44,8 @@ class RPC(object):
             )
         if api_session is None:
             api_session = requests.Session()
+            # Don't use system proxies for FlareSolverr communication
+            api_session.trust_env = False
 
         self._flaresolverr_url = flaresolverr_url
         self._api_session = api_session
