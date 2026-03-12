@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import datetime
 import unittest
 
 try:
@@ -686,6 +687,65 @@ class TestThreadSafety(unittest.TestCase):
         self.assertEqual(errors, [])
         # Serialized order: t1 start, t1 end, t2 start, t2 end
         self.assertEqual(order, [("start", 1), ("end", 1), ("start", 2), ("end", 2)])
+
+
+class TestSessionTTL(unittest.TestCase):
+    """Tests for the ttl option on Session."""
+
+    def test_default_ttl_is_none(self):
+        """By default, no session_ttl_minutes is sent."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertNotIn("session_ttl_minutes", kwargs)
+
+    def test_ttl_int_passed_to_rpc(self):
+        """Integer ttl is forwarded as session_ttl_minutes."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc, ttl=10) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["session_ttl_minutes"], 10)
+
+    def test_ttl_timedelta_passed_to_rpc(self):
+        """timedelta ttl is converted to minutes and forwarded."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc, ttl=datetime.timedelta(minutes=15)) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["session_ttl_minutes"], 15)
+
+    def test_ttl_timedelta_fractional_minutes_truncated(self):
+        """timedelta with partial minutes is truncated to whole minutes."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc, ttl=datetime.timedelta(seconds=90)) as session:
+            session.get("https://example.com/")
+        kwargs = rpc.request.get.call_args[1]
+        self.assertEqual(kwargs["session_ttl_minutes"], 1)
+
+    def test_ttl_passed_on_post(self):
+        """ttl is also forwarded on POST requests."""
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc, ttl=5) as session:
+            session.post("https://example.com/submit", data="x=1")
+        kwargs = rpc.request.post.call_args[1]
+        self.assertEqual(kwargs["session_ttl_minutes"], 5)
+
+    def test_ttl_stored_as_int_from_timedelta(self):
+        """Session._ttl stores an int when initialised from a timedelta."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc, ttl=datetime.timedelta(minutes=20))
+        self.assertIsInstance(session._ttl, int)
+        self.assertEqual(session._ttl, 20)
+        session.close()
+
+    def test_ttl_stored_directly_as_int(self):
+        """Session._ttl stores the int directly when given an int."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc, ttl=30)
+        self.assertEqual(session._ttl, 30)
+        session.close()
 
 
 if __name__ == "__main__":

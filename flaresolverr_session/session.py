@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import datetime
 import threading
 import time
 import warnings
@@ -44,6 +45,11 @@ class Session(requests.Session):
         max_retries (int): Number of times to retry the request when a
             :class:`~flaresolverr_session.exceptions.FlareSolverrChallengeError`
             is raised (e.g. FlareSolverr challenge timeout).
+        ttl (int, datetime.timedelta or None): Session TTL passed to
+            FlareSolverr as ``session_ttl_minutes``.  An *int* is
+            treated as minutes; a :class:`datetime.timedelta` is
+            converted to whole minutes.  When *None* (default), no TTL
+            is sent.
 
     .. note::
 
@@ -65,6 +71,7 @@ class Session(requests.Session):
         timeout=None,
         rpc=None,
         max_retries=0,
+        ttl=None,
     ):
         super(Session, self).__init__()
 
@@ -87,6 +94,10 @@ class Session(requests.Session):
         self._session_id = session_id
         self._session_created = False
         self._max_retries = max_retries
+        if isinstance(ttl, datetime.timedelta):
+            self._ttl = int(ttl.total_seconds() // 60)
+        else:
+            self._ttl = ttl
         self._lock = threading.Lock()
 
     @property
@@ -179,6 +190,10 @@ class Session(requests.Session):
 
         # Optional cookies
         request_kwargs["cookies"] = kwargs.get("cookies")
+
+        # Session TTL
+        if self._ttl is not None:
+            request_kwargs["session_ttl_minutes"] = self._ttl
 
         return request_kwargs
 
