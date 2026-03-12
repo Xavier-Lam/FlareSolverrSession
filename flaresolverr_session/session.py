@@ -59,7 +59,7 @@ class Session(requests.Session):
         :class:`FlareSolverrUnsupportedMethodError`.
     """
 
-    DEFAULT_TIMEOUT = 60000
+    DEFAULT_TIMEOUT = 30000
 
     _SUPPORTED_METHODS = ("GET", "POST")
 
@@ -70,7 +70,7 @@ class Session(requests.Session):
         proxy=None,
         timeout=None,
         rpc=None,
-        max_retries=0,
+        max_retries=1,
         ttl=None,
     ):
         super(Session, self).__init__()

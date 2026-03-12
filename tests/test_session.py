@@ -512,11 +512,11 @@ class TestSessionRetry(unittest.TestCase):
             response_data={"status": "error", "message": "Challenge timeout"},
         )
 
-    def test_retry_disabled_by_default(self):
-        """max_retries defaults to 0: FlareSolverrChallengeError propagates."""
+    def test_retry_disabled(self):
+        """max_retries=0: FlareSolverrChallengeError propagates."""
         rpc = _make_mock_rpc()
         rpc.request.get.side_effect = self._make_challenge_error()
-        with _make_session(rpc=rpc) as session:
+        with _make_session(rpc=rpc, max_retries=0) as session:
             with self.assertRaises(FlareSolverrChallengeError):
                 session.get("https://example.com/")
 
@@ -592,13 +592,6 @@ class TestSessionRetry(unittest.TestCase):
         rpc = _make_mock_rpc()
         session = Session(rpc=rpc, max_retries=4)
         self.assertEqual(session._max_retries, 4)
-        session.close()
-
-    def test_default_max_retries_is_zero(self):
-        """Default max_retries is 0."""
-        rpc = _make_mock_rpc()
-        session = Session(rpc=rpc)
-        self.assertEqual(session._max_retries, 0)
         session.close()
 
 
