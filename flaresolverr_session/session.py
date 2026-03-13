@@ -92,6 +92,7 @@ class Session(requests.Session):
             proxy = {"url": proxy}
         self._proxy = proxy
         self._session_id = session_id
+        self._custom_session_id = session_id
         self._session_created = False
         self._max_retries = max_retries
         if isinstance(ttl, datetime.timedelta):
@@ -104,7 +105,7 @@ class Session(requests.Session):
     def session_id(self):
         """The FlareSolverr session identifier."""
         if not self._session_created:
-            self._create_session()
+            self.create()
         return self._session_id
 
     def request(self, method, url, **kwargs):
@@ -164,7 +165,12 @@ class Session(requests.Session):
         ``requests.Session``."""
         try:
             if self._session_created:
-                self._destroy_session()
+                self.destroy()
+        except Exception as e:
+            warnings.warn(
+                "Error destroying FlareSolverr session %s: %s" % (self._session_id, e),
+                stacklevel=2,
+            )
         finally:
             super(Session, self).close()
 
@@ -197,21 +203,36 @@ class Session(requests.Session):
 
         return request_kwargs
 
-    def _create_session(self):
-        """Create a FlareSolverr browser session via RPC."""
+    @property
+    def exists(self):
+        """Check if the FlareSolverr session exists."""
+        if not self._session_id:
+            return False
+        data = self._rpc.session.list()
+        sessions = data["sessions"]
+        return self._session_id in sessions
+
+    def create(self, force=False):
+        """Create a FlareSolverr browser session via RPC.
+
+        Parameters:
+            force (bool): If *True*, destroy any existing session before
+                creating a new one.
+        """
+        if force and self._session_id:
+            self.destroy()
         data = self._rpc.session.create(session_id=self._session_id, proxy=self._proxy)
         self._session_id = data.get("session", self._session_id)
         self._session_created = True
 
-    def _destroy_session(self):
+    def destroy(self):
         """Destroy the FlareSolverr browser session via RPC."""
         if not self._session_id:
             return
-        try:
-            self._rpc.session.destroy(self._session_id)
-        except Exception:
-            return  # Best-effort cleanup
+        self._rpc.session.destroy(self._session_id)
         self._session_created = False
+        if not self._custom_session_id:
+            self._session_id = None
 
 
 class FlareSolverr(object):

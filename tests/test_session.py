@@ -8,6 +8,8 @@ try:
 except ImportError:
     import mock  # Python 2 back-port
 
+import warnings
+
 import requests
 
 from flaresolverr_session import (
@@ -739,6 +741,312 @@ class TestSessionTTL(unittest.TestCase):
         session = Session(rpc=rpc, ttl=30)
         self.assertEqual(session._ttl, 30)
         session.close()
+
+
+class TestExistsProperty(unittest.TestCase):
+    """Tests for the Session.exists property."""
+
+    def test_exists_false_when_no_session_id(self):
+        """exists returns False immediately when _session_id is not set."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        # Never trigger session creation; _session_id stays None
+        self.assertFalse(session.exists)
+        rpc.session.list.assert_not_called()
+        session.close()
+
+    def test_exists_true_when_session_in_list(self):
+        """exists returns True when the session id appears in rpc.session.list."""
+        rpc = _make_mock_rpc(session_id="live-session")
+        rpc.session.list.return_value = {"sessions": ["live-session", "other"]}
+        session = Session(rpc=rpc, session_id="live-session")
+        try:
+            self.assertTrue(session.exists)
+        finally:
+            session.close()
+
+    def test_exists_false_when_session_not_in_list(self):
+        """exists returns False when the session id is absent from the list."""
+        rpc = _make_mock_rpc(session_id="gone-session")
+        rpc.session.list.return_value = {"sessions": ["other-session"]}
+        session = Session(rpc=rpc, session_id="gone-session")
+        try:
+            self.assertFalse(session.exists)
+        finally:
+            session.close()
+
+    def test_exists_calls_rpc_session_list(self):
+        """exists delegates to rpc.session.list to check membership."""
+        rpc = _make_mock_rpc(session_id="check-session")
+        session = Session(rpc=rpc, session_id="check-session")
+        try:
+            _ = session.exists
+        finally:
+            session.close()
+        rpc.session.list.assert_called_once()
+
+    def test_exists_false_on_empty_list(self):
+        """exists returns False when the server returns an empty sessions list."""
+        rpc = _make_mock_rpc(session_id="any-session")
+        rpc.session.list.return_value = {"sessions": []}
+        session = Session(rpc=rpc, session_id="any-session")
+        try:
+            self.assertFalse(session.exists)
+        finally:
+            session.close()
+
+
+class TestPublicCreateMethod(unittest.TestCase):
+    """Tests for the public Session.create() method."""
+
+    def test_create_calls_rpc_session_create(self):
+        """create() invokes rpc.session.create once."""
+        rpc = _make_mock_rpc(session_id="new-id")
+        session = Session(rpc=rpc)
+        try:
+            session.create()
+            rpc.session.create.assert_called_once()
+        finally:
+            session.close()
+
+    def test_create_sets_session_created_flag(self):
+        """create() sets _session_created to True."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        self.assertFalse(session._session_created)
+        try:
+            session.create()
+            self.assertTrue(session._session_created)
+        finally:
+            session.close()
+
+    def test_create_updates_session_id_from_rpc(self):
+        """create() stores the session id returned by rpc.session.create."""
+        rpc = _make_mock_rpc(session_id="rpc-assigned-id")
+        session = Session(rpc=rpc)
+        try:
+            session.create()
+            self.assertEqual(session._session_id, "rpc-assigned-id")
+        finally:
+            session.close()
+
+    def test_create_force_destroys_existing_session(self):
+        """create(force=True) calls destroy() before creating a new session."""
+        rpc = _make_mock_rpc(session_id="existing-id")
+        session = Session(rpc=rpc, session_id="existing-id")
+        try:
+            session.create()  # establish _session_created = True
+            rpc.session.destroy.reset_mock()
+            session.create(force=True)
+            rpc.session.destroy.assert_called_once_with("existing-id")
+        finally:
+            session.close()
+
+    def test_create_force_without_session_id_skips_destroy(self):
+        """create(force=True) does not call destroy() when no session id is set."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        try:
+            session.create(force=True)
+            rpc.session.destroy.assert_not_called()
+        finally:
+            session.close()
+
+    def test_create_no_force_does_not_destroy(self):
+        """create(force=False) never calls destroy() regardless of existing session."""
+        rpc = _make_mock_rpc(session_id="keep-me")
+        session = Session(rpc=rpc, session_id="keep-me")
+        try:
+            session.create()  # first create
+            rpc.session.destroy.reset_mock()
+            session.create(force=False)  # second create, no force
+            rpc.session.destroy.assert_not_called()
+        finally:
+            session.close()
+
+    def test_create_passes_proxy_to_rpc(self):
+        """create() forwards the proxy to rpc.session.create."""
+        rpc = _make_mock_rpc()
+        proxy = {"url": "http://proxy.example.com:8080"}
+        session = Session(rpc=rpc, proxy=proxy)
+        try:
+            session.create()
+            _, kwargs = rpc.session.create.call_args
+            self.assertEqual(kwargs.get("proxy"), proxy)
+        finally:
+            session.close()
+
+    def test_create_passes_session_id_to_rpc(self):
+        """create() forwards an explicit session_id to rpc.session.create."""
+        rpc = _make_mock_rpc(session_id="explicit-create")
+        session = Session(rpc=rpc, session_id="explicit-create")
+        try:
+            session.create()
+            _, kwargs = rpc.session.create.call_args
+            self.assertEqual(kwargs.get("session_id"), "explicit-create")
+        finally:
+            session.close()
+
+
+class TestPublicDestroyMethod(unittest.TestCase):
+    """Tests for the public Session.destroy() method."""
+
+    def test_destroy_calls_rpc_session_destroy(self):
+        """destroy() calls rpc.session.destroy with the current session id."""
+        rpc = _make_mock_rpc(session_id="kill-me")
+        session = Session(rpc=rpc, session_id="kill-me")
+        try:
+            session.create()
+            session.destroy()
+            rpc.session.destroy.assert_called_once_with("kill-me")
+        finally:
+            session.close()
+
+    def test_destroy_clears_session_created_flag(self):
+        """destroy() sets _session_created to False."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        try:
+            session.create()
+            self.assertTrue(session._session_created)
+            session.destroy()
+            self.assertFalse(session._session_created)
+        finally:
+            session.close()
+
+    def test_destroy_clears_session_id_for_auto_session(self):
+        """destroy() sets _session_id to None when no custom session_id was given."""
+        rpc = _make_mock_rpc(session_id="auto-gen")
+        session = Session(rpc=rpc)
+        session.create()
+        self.assertEqual(session._session_id, "auto-gen")
+        session.destroy()
+        self.assertIsNone(session._session_id)
+        session.close()
+
+    def test_destroy_preserves_session_id_for_custom_session(self):
+        """destroy() does NOT clear _session_id when a custom session_id was given."""
+        rpc = _make_mock_rpc(session_id="my-fixed-id")
+        session = Session(rpc=rpc, session_id="my-fixed-id")
+        try:
+            session.create()
+            session.destroy()
+            self.assertEqual(session._session_id, "my-fixed-id")
+        finally:
+            session.close()
+
+    def test_destroy_does_nothing_when_no_session_id(self):
+        """destroy() is a no-op when _session_id is None."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        # Do not call create(); _session_id is None
+        session.destroy()
+        rpc.session.destroy.assert_not_called()
+        session.close()
+
+    def test_destroy_propagates_rpc_exceptions(self):
+        """destroy() does not swallow exceptions from rpc.session.destroy."""
+        rpc = _make_mock_rpc(session_id="boom-id")
+        rpc.session.destroy.side_effect = RuntimeError("RPC failure")
+        session = Session(rpc=rpc, session_id="boom-id")
+        session.create()
+        with self.assertRaises(RuntimeError):
+            session.destroy()
+        session._session_created = False  # prevent close() from re-raising
+        session.close()
+
+
+class TestCloseErrorHandling(unittest.TestCase):
+    """close() must issue a warning when destroy() raises, then still close."""
+
+    def test_close_warns_on_destroy_error(self):
+        """close() issues a UserWarning when rpc.session.destroy raises."""
+        rpc = _make_mock_rpc(session_id="warn-id")
+        rpc.session.destroy.side_effect = RuntimeError("destroy failed")
+        session = Session(rpc=rpc)
+        session.create()
+        with self.assertWarns(UserWarning):
+            session.close()
+
+    def test_close_warning_contains_session_id(self):
+        """The warning message includes the session id for diagnostics."""
+        rpc = _make_mock_rpc(session_id="diag-id")
+        rpc.session.destroy.side_effect = RuntimeError("network error")
+        session = Session(rpc=rpc, session_id="diag-id")
+        session.create()
+        with self.assertWarns(UserWarning) as cm:
+            session.close()
+        self.assertIn("diag-id", str(cm.warning))
+
+    def test_close_completes_after_destroy_error(self):
+        """close() finishes successfully (calls super) even when destroy() raises."""
+        rpc = _make_mock_rpc(session_id="safe-close")
+        rpc.session.destroy.side_effect = RuntimeError("transient error")
+        session = Session(rpc=rpc)
+        session.create()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Must not raise despite destroy() failing
+            try:
+                session.close()
+            except Exception as exc:
+                self.fail("close() raised unexpectedly: %s" % exc)
+
+    def test_close_no_warning_on_success(self):
+        """close() does not warn when destroy() succeeds."""
+        rpc = _make_mock_rpc(session_id="clean-close")
+        session = Session(rpc=rpc)
+        session.create()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            session.close()
+        self.assertEqual(len(w), 0)
+
+
+class TestCustomSessionIdTracking(unittest.TestCase):
+    """_custom_session_id stores the caller-supplied session_id."""
+
+    def test_custom_session_id_stored_when_given(self):
+        """_custom_session_id equals the session_id passed at construction."""
+        rpc = _make_mock_rpc(session_id="user-provided")
+        session = Session(rpc=rpc, session_id="user-provided")
+        try:
+            self.assertEqual(session._custom_session_id, "user-provided")
+        finally:
+            session.close()
+
+    def test_custom_session_id_is_none_when_not_given(self):
+        """_custom_session_id is None when no session_id is passed."""
+        rpc = _make_mock_rpc()
+        session = Session(rpc=rpc)
+        try:
+            self.assertIsNone(session._custom_session_id)
+        finally:
+            session.close()
+
+    def test_custom_session_id_unchanged_after_create(self):
+        """_custom_session_id is not mutated when create() assigns a new session id."""
+        rpc = _make_mock_rpc(session_id="server-assigned")
+        session = Session(rpc=rpc)
+        try:
+            session.create()
+            self.assertIsNone(session._custom_session_id)
+            self.assertEqual(session._session_id, "server-assigned")
+        finally:
+            session.close()
+
+    def test_custom_session_id_unchanged_after_destroy(self):
+        """_custom_session_id is preserved even after destroy() clears _session_id."""
+        rpc = _make_mock_rpc(session_id="fixed-id")
+        session = Session(rpc=rpc, session_id="fixed-id")
+        try:
+            session.create()
+            session.destroy()
+            self.assertEqual(session._custom_session_id, "fixed-id")
+        finally:
+            session.close()
 
 
 if __name__ == "__main__":
