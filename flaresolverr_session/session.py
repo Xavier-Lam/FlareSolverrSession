@@ -88,9 +88,6 @@ class Session(requests.Session):
         self._rpc = rpc
 
         self._timeout = timeout or self.DEFAULT_TIMEOUT
-        if proxy and not isinstance(proxy, dict):
-            proxy = {"url": proxy}
-        self._proxy = proxy
         self._session_id = session_id
         self._custom_session_id = session_id
         self._session_created = False
@@ -100,6 +97,7 @@ class Session(requests.Session):
         else:
             self._ttl = ttl
         self._lock = threading.Lock()
+        self.proxies = proxy
 
     @property
     def session_id(self):
@@ -107,6 +105,10 @@ class Session(requests.Session):
         if not self._session_created:
             self.create()
         return self._session_id
+
+    # ------------------------------------------------------------------
+    # request
+    # ------------------------------------------------------------------
 
     def request(self, method, url, **kwargs):
         """Send a request through FlareSolverr.
@@ -160,20 +162,6 @@ class Session(requests.Session):
                 attempts += 1
                 time.sleep(1)
 
-    def close(self):
-        """Destroy the FlareSolverr session and close the inherited
-        ``requests.Session``."""
-        try:
-            if self._session_created:
-                self.destroy()
-        except Exception as e:
-            warnings.warn(
-                "Error destroying FlareSolverr session %s: %s" % (self._session_id, e),
-                stacklevel=2,
-            )
-        finally:
-            super(Session, self).close()
-
     def _build_request_kwargs(self, method, url, **kwargs):
         params = kwargs.get("params")
         if params:
@@ -203,6 +191,10 @@ class Session(requests.Session):
 
         return request_kwargs
 
+    # ------------------------------------------------------------------
+    # management
+    # ------------------------------------------------------------------
+
     @property
     def exists(self):
         """Check if the FlareSolverr session exists."""
@@ -220,19 +212,88 @@ class Session(requests.Session):
                 creating a new one.
         """
         if force and self._session_id:
-            self.destroy()
-        data = self._rpc.session.create(session_id=self._session_id, proxy=self._proxy)
+            self.destroy(force)
+        data = self._rpc.session.create(
+            session_id=self._session_id, proxy=self.proxies.get("http")
+        )
         self._session_id = data.get("session", self._session_id)
         self._session_created = True
 
-    def destroy(self):
-        """Destroy the FlareSolverr browser session via RPC."""
+    def destroy(self, force=False):
+        """Destroy the FlareSolverr browser session via RPC.
+
+        Parameters:
+            force (bool): If *True*, attempt to destroy the session even if
+                it is not marked as created. This can be used to clean up
+                sessions that were created outside of this instance.
+        """
+        if not force and not self._session_created:
+            return
         if not self._session_id:
             return
         self._rpc.session.destroy(self._session_id)
         self._session_created = False
         if not self._custom_session_id:
             self._session_id = None
+
+    # ------------------------------------------------------------------
+    # proxy
+    # ------------------------------------------------------------------
+
+    _proxy = None
+
+    @property
+    def proxies(self):
+        if not self._proxy:
+            return {}
+        return {"http": self._proxy, "https": self._proxy}
+
+    @proxies.setter
+    def proxies(self, value):
+        if not value and not self._proxy:
+            return
+        value = self.normalize_proxies(value)
+        if self._proxy != value:
+            # session should be recreated if a new proxy is applied
+            self.destroy()
+        self._proxy = value
+
+    @proxies.deleter
+    def proxies(self):
+        self._proxy = None
+
+    def normalize_proxies(self, proxies):
+        if not proxies:
+            return ""
+        elif isinstance(proxies, dict):
+            if "url" in proxies:
+                return proxies["url"]
+            else:
+                url = proxies.get("http") or proxies.get("https")
+                if not url:
+                    raise ValueError(
+                        "Invalid proxy dict: must contain 'url' key or 'http'/'https' keys."
+                    )
+                return url
+        else:
+            return proxies
+
+    # ------------------------------------------------------------------
+    # lifecycle
+    # ------------------------------------------------------------------
+
+    def close(self):
+        """Destroy the FlareSolverr session and close the inherited
+        ``requests.Session``."""
+        try:
+            self.destroy()
+        except Exception as e:
+            warnings.warn(
+                "Error destroying FlareSolverr session %s: %s" % (self._session_id, e),
+                stacklevel=2,
+            )
+        finally:
+            super(Session, self).close()
 
 
 class FlareSolverr(object):

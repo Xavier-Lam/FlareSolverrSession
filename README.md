@@ -44,10 +44,12 @@ with Session("http://localhost:8191/v1") as session:
     print(response.text)
 ```
 
+> Using `with` statement automatically destroys the browser instance of *Flaresolverr* session if any request is made during the block.
+
 It is recommended to set a persistent `session_id`.
 
 ```python
-session = Session(
+Session(
     "http://localhost:8191/v1",
     session_id="my-persistent-session",
 )

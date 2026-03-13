@@ -143,16 +143,13 @@ class TestSession(unittest.TestCase):
         rpc.request.get.assert_not_called()
         rpc.request.post.assert_not_called()
 
-    # ------------------------------------------------------------------
-    #  lifecycle tests
-    # ------------------------------------------------------------------
-
     def test_session_reuse_across_requests(self):
         rpc = _make_mock_rpc(session_id="reuse-id")
         with _make_session(rpc=rpc) as session:
             session.get("https://example.com/1")
             session.get("https://example.com/2")
             session.post("https://example.com/", data="x=1")
+        rpc.session.create.assert_called_once()
         ids = [c[1]["session_id"] for c in rpc.request.get.call_args_list]
         self.assertEqual(ids[0], ids[1])
         self.assertEqual(ids[0], "reuse-id")
@@ -209,36 +206,14 @@ class TestSession(unittest.TestCase):
         finally:
             session.close()
 
-        # proxy
-        rpc = _make_mock_rpc()
-        session = Session(rpc=rpc)
-        try:
-            session.create(force=True)
-            rpc.session.destroy.assert_not_called()
-        finally:
-            session.close()
-        proxy = {"url": "http://proxy.example.com:8080"}
-
-        session = Session(rpc=rpc, session_id="explicit-create", proxy=proxy)
-        try:
-            session.create()
-            _, kwargs = rpc.session.create.call_args
-            self.assertEqual(kwargs.get("proxy"), proxy)
-            self.assertEqual(kwargs.get("session_id"), "explicit-create")
-        finally:
-            session.close()
-
     def test_destroy(self):
         rpc = _make_mock_rpc(session_id="kill-me")
         session = Session(rpc=rpc, session_id="kill-me")
-        try:
-            session.create()
-            self.assertTrue(session._session_created)
-            session.destroy()
-            rpc.session.destroy.assert_called_once_with("kill-me")
-            self.assertFalse(session._session_created)
-        finally:
-            session.close()
+        session.create()
+        self.assertTrue(session._session_created)
+        session.destroy()
+        rpc.session.destroy.assert_called_once_with("kill-me")
+        self.assertFalse(session._session_created)
 
         # test destroy() clears session_id for auto-created sessions, but not for user-provided ids
         rpc = _make_mock_rpc(session_id="auto-gen")
@@ -247,7 +222,21 @@ class TestSession(unittest.TestCase):
         self.assertEqual(session._session_id, "auto-gen")
         session.destroy()
         self.assertIsNone(session._session_id)
-        session.close()
+
+        # force destroy
+        rpc = _make_mock_rpc(session_id="force-kill")
+        session = Session(rpc=rpc, session_id="force-kill")
+        session.destroy(force=True)
+        rpc.session.destroy.assert_called_once_with("force-kill")
+
+        # recreate after destroy
+        rpc = _make_mock_rpc(session_id="recreate")
+        session = Session(rpc=rpc, session_id="recreate")
+        session.create()
+        session.destroy()
+        rpc.session.create.reset_mock()
+        session.get("https://example.com/")
+        rpc.session.create.assert_called_once()
 
     # ------------------------------------------------------------------
     #  retry
@@ -300,6 +289,115 @@ class TestSession(unittest.TestCase):
                     session.get("https://example.com/")
         self.assertEqual(rpc.request.get.call_count, 1)
         self.assertNotIsInstance(ctx.exception, FlareSolverrChallengeError)
+
+    # ------------------------------------------------------------------
+    #  proxy
+    # ------------------------------------------------------------------
+
+    def test_normalize_proxies(self):
+        session = Session()
+        self.assertEqual(session.normalize_proxies(None), "")
+        self.assertEqual(
+            session.normalize_proxies("http://proxy:8080"),
+            "http://proxy:8080",
+        )
+        self.assertEqual(
+            session.normalize_proxies({"url": "http://proxy:8080"}),
+            "http://proxy:8080",
+        )
+        self.assertEqual(
+            session.normalize_proxies({"http": "http://proxy:8080"}),
+            "http://proxy:8080",
+        )
+        self.assertEqual(
+            session.normalize_proxies({"https": "http://proxy:8080"}),
+            "http://proxy:8080",
+        )
+        self.assertEqual(
+            session.normalize_proxies(
+                {"http": "http://proxy:8080", "https": "http://proxy:8180"}
+            ),
+            "http://proxy:8080",
+        )
+        with self.assertRaises(ValueError):
+            session.normalize_proxies({"invalid": "http://proxy:8080"})
+
+    def test_proxy_initialization(self):
+        session = Session()
+        self.assertEqual(session.proxies, {})
+        session = Session(proxy="http://proxy:8080")
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8080", "https": "http://proxy:8080"}
+        )
+        session = Session(proxy={"url": "http://proxy:8080"})
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8080", "https": "http://proxy:8080"}
+        )
+        session = Session(proxy={"http": "http://proxy:8080"})
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8080", "https": "http://proxy:8080"}
+        )
+
+    def test_proxies_assignment(self):
+        session = Session()
+        session.proxies = "http://proxy:8080"
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8080", "https": "http://proxy:8080"}
+        )
+        session.proxies = {"url": "http://proxy:8081"}
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8081", "https": "http://proxy:8081"}
+        )
+        session.proxies = {"http": "http://proxy:8082"}
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8082", "https": "http://proxy:8082"}
+        )
+        session.proxies = {"https": "http://proxy:8083"}
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8083", "https": "http://proxy:8083"}
+        )
+        session.proxies = {"http": "http://proxy:8084", "https": "http://proxy:8085"}
+        self.assertEqual(
+            session.proxies, {"http": "http://proxy:8084", "https": "http://proxy:8084"}
+        )
+        session.proxies = None
+        self.assertEqual(session.proxies, {})
+        session.proxies = ""
+        self.assertEqual(session.proxies, {})
+        session.proxies = {}
+        self.assertEqual(session.proxies, {})
+        session.proxies = "http://proxy:8080"
+        del session.proxies
+        self.assertEqual(session.proxies, {})
+
+    def test_proxy_applied_on_create(self):
+        rpc = _make_mock_rpc(session_id="no-proxy")
+        session = Session(rpc=rpc)
+        session.create()
+        rpc.session.create.assert_called_once()
+        kwargs = rpc.session.create.call_args[1]
+        self.assertIsNone(kwargs.get("proxy"))
+
+        rpc = _make_mock_rpc(session_id="proxy-session")
+        session = Session(rpc=rpc, proxy="http://proxy:8080")
+        session.create()
+        rpc.session.create.assert_called_once()
+        kwargs = rpc.session.create.call_args[1]
+        self.assertEqual(kwargs.get("proxy"), "http://proxy:8080")
+
+    def test_proxies_assignment_destroy_session(self):
+        rpc = _make_mock_rpc(session_id="session1")
+        session = Session(rpc=rpc)
+        session.create()
+        rpc.session.create.assert_called_once()
+        session.proxies = "http://proxy:8080"
+        rpc.session.destroy.assert_called_once_with("session1")
+
+        # same proxy, no destroy
+        session.proxies = "http://proxy:8080"
+        rpc.session.destroy.assert_called_once_with("session1")
+        session.proxies = {"http": "http://proxy:8080"}
+        rpc.session.destroy.assert_called_once_with("session1")
 
     # ------------------------------------------------------------------
     #  construction
@@ -366,10 +464,24 @@ class TestSession(unittest.TestCase):
     #  destruction and cleanup
     # ------------------------------------------------------------------
 
-    def test_destroy_not_called_if_never_created(self):
+    def test_close_destroys_flaresolverr_session(self):
         rpc = _make_mock_rpc()
         Session(rpc=rpc).close()
         rpc.session.destroy.assert_not_called()
+
+        # auto destroy
+        rpc = _make_mock_rpc(session_id="auto-destroy")
+        session = Session(rpc=rpc, session_id="auto-destroy")
+        session.create()
+        self.assertTrue(session._session_created)
+        session.close()
+        rpc.session.destroy.assert_called_once_with("auto-destroy")
+
+    def test_context_manager(self):
+        rpc = _make_mock_rpc(session_id="context-session")
+        with Session(rpc=rpc, session_id="context-session") as session:
+            session.get("https://example.com/")
+        rpc.session.destroy.assert_called_once_with("context-session")
 
 
 class TestResponse(unittest.TestCase):
