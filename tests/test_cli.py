@@ -296,6 +296,22 @@ class TestRequestWithOptions(unittest.TestCase):
             "https://example.com", session_id="my-session"
         )
 
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "--session", "another-session"]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://example.com", session_id="another-session"
+        )
+
+        code, out, _err, rpc = _run_cli(
+            ["https://example.com", "--session-id", "third-session"]
+        )
+        self.assertEqual(code, 0)
+        rpc.request.get.assert_called_once_with(
+            "https://example.com", session_id="third-session"
+        )
+
     def test_timeout(self):
         """Request with -t timeout."""
         code, out, _err, rpc = _run_cli(["https://example.com", "-t", "30000"])

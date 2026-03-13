@@ -2,6 +2,7 @@
 
 import json
 import os
+import warnings
 
 try:
     from urllib import urlencode
@@ -385,6 +386,12 @@ class RequestCommand(object):
                 payload["proxy"] = proxy
             else:
                 payload["proxy"] = {"url": proxy}
+        if session_id and proxy:
+            warnings.warn(
+                "You specified a proxy for a request with session_id "
+                "set. The request-level proxy setting will be ignored.",
+                stacklevel=2,
+            )
         if cookies:
             payload["cookies"] = cookies
         if session_ttl_minutes is not None:

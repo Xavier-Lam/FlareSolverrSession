@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+import warnings
 
 from flaresolverr_session.rpc import RPC
 from flaresolverr_session.exceptions import (
@@ -148,6 +149,7 @@ def _build_request_parser():
     )
     sub_parser.add_argument(
         "-s",
+        "--session",
         "--session-id",
         dest="session_id",
         default=None,
@@ -276,6 +278,12 @@ def _handle_request(rpc, args):
     proxy = getattr(args, "proxy", None)
     if proxy:
         kwargs["proxy"] = proxy
+    elif os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY"):
+        warnings.warn(
+            "Detected HTTP_PROXY or HTTPS_PROXY environment variable, "
+            "it will be ignored, use --proxy option instead",
+            stacklevel=2,
+        )
     session_ttl_minutes = getattr(args, "session_ttl_minutes", None)
     if session_ttl_minutes is not None:
         kwargs["session_ttl_minutes"] = session_ttl_minutes
