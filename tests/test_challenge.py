@@ -33,14 +33,8 @@ NO_CHALLENGE_SITES = [
 
 
 class ChallengeTestCase(RPCTestCase):
-    """Real GET requests to challenge sites via FlareSolverr.
-
-    Exercises the full challenge-solving path.  Each test is generated
-    from an entry in ``tests.test_challenge.CHALLENGE_SITES``.
-    """
 
     def _assert_site_solution(self, result, entry):
-        """Assert that a FlareSolverr result satisfies a testconf entry."""
         self._assert_ok(result)
         solution = result.get("solution", {})
         self._assert_solution(solution)
@@ -76,32 +70,19 @@ class ChallengeTestCase(RPCTestCase):
 
 
 class TestChallengeSites(ChallengeTestCase):
-    """Real GET requests to challenge sites via FlareSolverr.
-
-    Exercises the full challenge-solving path.  Each test is generated
-    from an entry in ``tests.test_challenge.CHALLENGE_SITES``.
-    """
+    pass
 
 
 class TestNoChallengeSites(ChallengeTestCase):
-    """Real GET requests to sites that do not present a challenge.
-
-    Each test is generated from an entry in
-    ``tests.test_challenge.NO_CHALLENGE_SITES``.
-    """
+    pass
 
 
 def _make_challenge_site_test(entry):
     def test(self):
         result = self.rpc.request.get(entry["url"])
         self._assert_site_solution(result, entry)
-        self.assertIn(
-            "challenge solved",
-            result.get("message", "").lower(),
-            "Expected 'Challenge solved' in FlareSolverr message",
-        )
+        self.assertIn("challenge solved", result.get("message", "").lower())
 
-    test.__doc__ = "Challenge site: %s" % entry["url"]
     return test
 
 
@@ -109,13 +90,8 @@ def _make_no_challenge_site_test(entry):
     def test(self):
         result = self.rpc.request.get(entry["url"])
         self._assert_site_solution(result, entry)
-        self.assertNotIn(
-            "challenge solved",
-            result.get("message", "").lower(),
-            "Did not expect 'Challenge solved' in FlareSolverr message for no-challenge site",
-        )
+        self.assertNotIn("challenge solved", result.get("message", "").lower())
 
-    test.__doc__ = "No-challenge site: %s" % entry["url"]
     return test
 
 

@@ -64,7 +64,6 @@ def _make_positive_test(path):
             "Expected challenge detection for: %s" % os.path.basename(path),
         )
 
-    test.__doc__ = "Positive challenge: %s" % os.path.basename(path)
     return test
 
 
@@ -76,7 +75,6 @@ def _make_negative_test(path):
             "Incorrectly detected challenge for: %s" % os.path.basename(path),
         )
 
-    test.__doc__ = "Negative challenge: %s" % os.path.basename(path)
     return test
 
 

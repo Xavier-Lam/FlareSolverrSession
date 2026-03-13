@@ -86,6 +86,8 @@ class SessionCommand(object):
         rpc (RPC): The parent RPC instance
     """
 
+    _rpc = None  # type: RPC
+
     def __init__(self, rpc):
         self._rpc = rpc
 
