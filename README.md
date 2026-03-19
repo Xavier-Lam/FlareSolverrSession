@@ -1,10 +1,11 @@
 # FlareSolverr Session
 
 [![PyPI version](https://badge.fury.io/py/flaresolverr-session.svg)](https://pypi.org/project/flaresolverr-session/)
+[![Supported Python versions](https://img.shields.io/badge/python-2.7%20%7C%203.4%2B-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml/badge.svg)](https://github.com/Xavier-Lam/FlareSolverrSession/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession/branch/master/graph/badge.svg)](https://codecov.io/gh/Xavier-Lam/FlareSolverrSession)
 
-A drop-in [`requests.Session`](https://docs.python-requests.org/) implementation that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API. The project is compatible with Python 2.7.
+A drop-in [`requests.Session`](https://docs.python-requests.org/) implementation that transparently routes all HTTP requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance, allowing you to bypass Cloudflare protection with a familiar Python API.
 
 The project also ships with an [Adapter](#adapter) which is able to handle complex requests if the [Session](#basic-usage) is insufficient in your use case, a [command-line interface (CLI)](#command-line-interface) for requests and session management, and an [RPC client](#rpc-tool) for direct access to the *FlareSolverr* JSON API.
 

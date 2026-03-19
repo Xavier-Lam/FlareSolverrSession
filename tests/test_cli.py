@@ -147,6 +147,21 @@ class TestSession(unittest.TestCase):
                 sys.stdout = old_stdout
         rpc_cls.assert_called_once_with("http://custom:9999/v1")
 
+    def test_create_force(self):
+        # Session exists, --force destroys before create
+        code, out, _err, rpc = _run_cli(["session", "create", "s1", "--force"])
+        rpc.session.destroy.assert_called_once_with("s1")
+        rpc.session.create.assert_called_once_with(session_id="s1", proxy=None)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(json.loads(out)), 1)
+
+        # Session does not exist, --force does not call destroy
+        code, out, _err, rpc = _run_cli(["session", "create", "s3", "--force"])
+        rpc.session.destroy.assert_not_called()
+        rpc.session.create.assert_called_once_with(session_id="s3", proxy=None)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(json.loads(out)), 1)
+
     def test_list_destroy_clear(self):
         # list
         code, out, _err, rpc = _run_cli(["session", "list"])
