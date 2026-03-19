@@ -460,6 +460,25 @@ class TestSession(unittest.TestCase):
             session.get("https://example.com/")
         self.assertEqual(rpc.request.get.call_args[1]["session_ttl_minutes"], 1)
 
+    def test_disable_media_handling(self):
+        # default: disable_media is not sent
+        rpc = _make_mock_rpc()
+        with _make_session(rpc=rpc) as session:
+            session.get("https://example.com/")
+        self.assertNotIn("disable_media", rpc.request.get.call_args[1])
+
+        # disable_media=True is forwarded for both GET and POST
+        with _make_session(rpc=rpc, disable_media=True) as session:
+            session.get("https://example.com/")
+            session.post("https://example.com/submit", data="x=1")
+        self.assertTrue(rpc.request.get.call_args[1]["disable_media"])
+        self.assertTrue(rpc.request.post.call_args[1]["disable_media"])
+
+        # disable_media=False behaves the same as the default (not sent)
+        with _make_session(rpc=rpc, disable_media=False) as session:
+            session.get("https://example.com/")
+        self.assertNotIn("disable_media", rpc.request.get.call_args[1])
+
     # ------------------------------------------------------------------
     #  destruction and cleanup
     # ------------------------------------------------------------------
